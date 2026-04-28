@@ -1,0 +1,42 @@
+{
+  "target": "test_target2.py",
+  "analysis": null,
+  "fuzzing": null,
+  "mitigations": {
+    "status": "ok",
+    "mitigations": [
+      {
+        "function": "init_db",
+        "cwe_id": "CWE-89",
+        "severity": "HIGH",
+        "explanation": "The code is vulnerable to SQL injection attacks because it constructs an SQL command using user-controlled input without proper neutralization. This allows an attacker to inject malicious SQL commands and execute unauthorized queries.",
+        "fixed_code": "\ndef init_db() -> None:\n    conn = sqlite3.connect(DB_PATH)\n    cur = conn.cursor()\n    query = \"CREATE TABLE IF NOT EXISTS users (\n        id INTEGER PRIMARY KEY AUTOINCREMENT,\n        username TEXT UNIQUE NOT NULL,\n        email TEXT NOT NULL\n    )\"\n    cur.execute(query)\n    cur.execute(\"INSERT OR IGNORE INTO users (username, email) VALUES ('alice', 'alice@example.com')\")\n    cur.execute(\"INSERT OR IGNORE INTO users (username, email) VALUES ('bob', 'bob@example.com')\")\n    conn.commit()\n    conn.close()\n",
+        "hardening": [
+          "Use parameterized queries or prepared statements to prevent SQL injection attacks.",
+          "Ensure that user input is properly sanitized and validated before being used in an SQL query."
+        ],
+        "references": [
+          "CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')",
+          "CVE-2004-2754: SQL injection vulnerability in SSI.php in YaBB SE"
+        ]
+      },
+      {
+        "function": "get_user",
+        "cwe_id": "CWE-89",
+        "severity": "HIGH",
+        "explanation": "The function does not properly validate the input 'username' parameter, making it vulnerable to SQL injection attacks. The query string is constructed using user-controlled input without proper sanitization or escaping.",
+        "fixed_code": "\ndef get_user(username: str):\n    conn = sqlite3.connect(DB_PATH)\n    cur = conn.cursor()\n\n    query = \"SELECT * FROM users WHERE username=?\"\n    cur.execute(query, (username,))\n    rows = cur.fetchall()\n    conn.close()\n\n    return jsonify({\"query\": query, \"rows\": rows})\n",
+        "hardening": [
+          "Use parameterized queries or prepared statements to prevent SQL injection attacks.",
+          "Validate and sanitize user input before using it in a database query."
+        ],
+        "references": [
+          "CWE-159: Improper Handling of Invalid Use of Special Elements",
+          "CVE-2004-2754: SQL injection vulnerability in SSI.php in YaBB SE"
+        ]
+      }
+    ],
+    "total": 2,
+    "min_severity_filter": "MEDIUM"
+  }
+}
