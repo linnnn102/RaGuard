@@ -56,44 +56,6 @@ CONFIG = {
     "top_k"        : int(os.getenv("TOP_K",            "6")),
 }
 
-# ── CWE → SecLists wordlist mapping ───────────────────────────────────────────
-# Maps CWE IDs to the most relevant SecLists wordlist paths (relative to SECLISTS_PATH).
-# Extend this dict as you add more CWEs to your knowledge base.
-CWE_WORDLIST_MAP = {
-    "CWE-89":  [
-        "Fuzzing/Databases/SQLi/MySQL-SQLi-Login-Bypass.fuzzdb.txt",
-        "Fuzzing/Databases/SQLi/Generic-SQLi.txt",
-    ],
-    "CWE-79":  [
-        "Fuzzing/XSS/human-friendly/XSS-Jhaddix.txt",
-        "Fuzzing/XSS/robot-friendly/XSS-Jhaddix.txt",
-        "Fuzzing/XSS/human-friendly/XSS-BruteLogic.txt",
-        "Fuzzing/XSS/robot-friendly/XSS-BruteLogic.txt",
-    ],
-    "CWE-78":  [
-        "Fuzzing/command-injection-commix.txt",
-    ],
-    "CWE-22":  [
-        "Fuzzing/LFI/Linux/LFI-gracefulsecurity-linux.txt",
-        "Fuzzing/LFI/LFI-LFISuite-pathtotest-huge.txt",
-    ],
-    # "CWE-287": [
-    # "CWE-352": [
-    # "CWE-434": [
-    # "CWE-918": [
-    "CWE-502": [
-        "Fuzzing/XSS/Polyglots/XSS-Polyglots.txt",
-    ],
-    "CWE-20":  [
-        "Fuzzing/XSS/Polyglots/XSS-Polyglots.txt",
-        "Fuzzing/special-chars.txt",
-    ],
-    # Fallback for unmapped CWEs
-    "_default": [
-        "Discovery/Web-Content/common.txt",
-    ],
-}
-
 MITIGATION_SYSTEM_PROMPT = """\
 You are am expert application security engineer specialising in Python secure code review.
 You are given a vulnerability finding and the relevant CWE/CVE reference context.

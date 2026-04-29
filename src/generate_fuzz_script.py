@@ -41,46 +41,10 @@ import stat
 from pathlib import Path
 
 # ── CWE → SecLists wordlist mapping ───────────────────────────────────────────
-# Paths are relative to /SecLists inside the Docker container.
-CWE_WORDLIST_MAP = {
-    "CWE-89":  [
-        "Fuzzing/Databases/SQLi/MySQL-SQLi-Login-Bypass.fuzzdb.txt",
-        "Fuzzing/Databases/SQLi/Generic-SQLi.txt",
-    ],
-    "CWE-79":  [
-        "Fuzzing/XSS/XSS-Jhaddix.txt",
-        "Fuzzing/XSS/XSS-BruteLogic.txt",
-    ],
-    "CWE-78":  [
-        "Fuzzing/command-injection-commix.txt",
-    ],
-    "CWE-22":  [
-        "Fuzzing/LFI/LFI-gracefulsecurity-linux.txt",
-        "Fuzzing/LFI/LFI-LFISuite-pathtotest-huge.txt",
-    ],
-    "CWE-287": [
-        "Fuzzing/Authentication/Authentication.txt",
-    ],
-    "CWE-352": [
-        "Fuzzing/CSRF/CSRF-token-wordlist.txt",
-    ],
-    "CWE-434": [
-        "Fuzzing/Extensions.fuzz.txt",
-    ],
-    "CWE-502": [
-        "Fuzzing/Polyglots/Polyglots.txt",
-    ],
-    "CWE-918": [
-        "Fuzzing/SSRF/SSRF-targets.txt",
-    ],
-    "CWE-20":  [
-        "Fuzzing/Polyglots/Polyglots.txt",
-        "Fuzzing/special-chars.txt",
-    ],
-    "_default": [
-        "Discovery/Web-Content/common.txt",
-    ],
-}
+# Loaded from data/cwe_wordlist_map.json — edit that file to add/change wordlists.
+_MAP_PATH = Path(__file__).resolve().parent.parent / "data" / "cwe_wordlist_map.json"
+with _MAP_PATH.open() as _f:
+    CWE_WORDLIST_MAP: dict = json.load(_f)
 
 SEVERITY_RANK = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "INFO": 0}
 

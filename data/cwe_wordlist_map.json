@@ -1,0 +1,42 @@
+{
+    "_comment": "CWE → SecLists wordlist mapping. Paths are relative to the SecLists root (SECLISTS_PATH env var in server.py; /SecLists inside Docker for generate_fuzz_script.py). Edit this file to add, remove, or update wordlists per CWE without touching any Python code.",
+    "CWE-89": [
+        "Fuzzing/Databases/SQLi/MySQL-SQLi-Login-Bypass.fuzzdb.txt",
+        "Fuzzing/Databases/SQLi/Generic-SQLi.txt"
+    ],
+    "CWE-79": [
+        "Fuzzing/XSS/human-friendly/XSS-Jhaddix.txt",
+        "Fuzzing/XSS/robot-friendly/XSS-Jhaddix.txt",
+        "Fuzzing/XSS/human-friendly/XSS-BruteLogic.txt",
+        "Fuzzing/XSS/robot-friendly/XSS-BruteLogic.txt"
+    ],
+    "CWE-78": [
+        "Fuzzing/command-injection-commix.txt"
+    ],
+    "CWE-22": [
+        "Fuzzing/LFI/Linux/LFI-gracefulsecurity-linux.txt",
+        "Fuzzing/LFI/LFI-LFISuite-pathtotest-huge.txt"
+    ],
+    "CWE-287": [
+        "Fuzzing/Authentication/Authentication.txt"
+    ],
+    "CWE-352": [
+        "Fuzzing/CSRF/CSRF-token-wordlist.txt"
+    ],
+    "CWE-434": [
+        "Fuzzing/Extensions.fuzz.txt"
+    ],
+    "CWE-502": [
+        "Fuzzing/XSS/Polyglots/XSS-Polyglots.txt"
+    ],
+    "CWE-918": [
+        "Fuzzing/SSRF/SSRF-targets.txt"
+    ],
+    "CWE-20": [
+        "Fuzzing/XSS/Polyglots/XSS-Polyglots.txt",
+        "Fuzzing/special-chars.txt"
+    ],
+    "_default": [
+        "Discovery/Web-Content/common.txt"
+    ]
+}
