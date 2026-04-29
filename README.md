@@ -10,7 +10,7 @@ The pipeline runs in three stages:
 
 1. **Static Analysis** — A local LLM (Llama 3 via Ollama) analyzes Python source code for vulnerabilities. Before each LLM call, relevant CWE definitions and real-world CVE examples are retrieved from a pre-built knowledge base using semantic similarity (cosine distance on `nomic-embed-text-v2-moe` embeddings). This RAG context grounds the model's output in authoritative security taxonomy.
 
-2. **Fuzzing Script Generation** — Detected CWE IDs are mapped to curated SecLists wordlists. A `fuzz.sh` script is generated with `ffuf` commands targeting each vulnerable endpoint, one job per CWE/wordlist combination.
+2. **Fuzzing Script Generation** — Detected CWE IDs are mapped to curated SecLists wordlists via `data/cwe_wordlist_map.json` (edit that file to add or change wordlists without touching any code). A `fuzz.sh` script is generated with `ffuf` commands targeting each vulnerable endpoint, one job per CWE/wordlist combination.
 
 3. **Dynamic Testing & Reporting** — The fuzzing script runs inside a Docker container. Raw `ffuf` JSON outputs are parsed into a structured report of confirmed hits, grouped by CWE.
 
@@ -30,7 +30,8 @@ src/
 
 data/
 ├── kb/rag_chunks.zip        # Pre-built knowledge base (CWE/CVE chunks + embeddings)
-└── cwe/cwec_v4.19.1.xml     # Full CWE taxonomy reference
+├── cwe/cwec_v4.19.1.xml     # Full CWE taxonomy reference
+└── cwe_wordlist_map.json    # CWE ID → SecLists wordlist mapping (edit to add/change wordlists)
 
 results/
 ├── reports/vuln_report.json # Output of vuln_scanner
