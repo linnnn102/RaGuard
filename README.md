@@ -8,9 +8,9 @@ An automated security testing pipeline that combines **Retrieval-Augmented Gener
 
 The pipeline runs in three stages:
 
-1. **Static Analysis** — A local LLM (Llama 3 via Ollama) analyzes Python source code for vulnerabilities. Before each LLM call, relevant CWE definitions and real-world CVE examples are retrieved from a pre-built knowledge base using semantic similarity (cosine distance on `nomic-embed-text-v2-moe` embeddings). This RAG context grounds the model's output in authoritative security taxonomy.
+1. **Static Analysis** — A local LLM (Qwen 3 via Ollama) analyzes Python source code for vulnerabilities. Before each LLM call, relevant CWE definitions and real-world CVE examples are retrieved from a pre-built knowledge base using semantic similarity (cosine distance on `nomic-embed-text-v2-moe` embeddings). This RAG context grounds the model's output in authoritative security taxonomy.
 
-2. **Fuzzing Script Generation** — Detected CWE IDs are mapped to curated SecLists wordlists. A `fuzz.sh` script is generated with `ffuf` commands targeting each vulnerable endpoint, one job per CWE/wordlist combination.
+2. **Fuzzing Script Generation** — For each vulnerable endpoint, the `(API, API source code)` pair and its vulnerability finding are handed to a language model (Qwen 3 via Ollama) along with a catalog of the wordlist files available in the [SecLists](https://github.com/danielmiessler/SecLists) repository (`data/seclists_catalog.txt`). The model picks the SecLists wordlist(s) best suited to fuzzing that specific vulnerability; every returned path is validated against the catalog so the model cannot invent one. If the model is unreachable, the pipeline falls back to the static `data/cwe_wordlist_map.json` map. A `fuzz.sh` script is then generated with `ffuf` commands, one job per CWE/wordlist combination.
 
 3. **Dynamic Testing & Reporting** — The fuzzing script runs inside a Docker container. Raw `ffuf` JSON outputs are parsed into a structured report of confirmed hits, grouped by CWE.
 
@@ -23,14 +23,21 @@ The pipeline can be run **step-by-step** (standalone scripts) or **end-to-end** 
 ```
 src/
 ├── vuln_scanner.py          # RAG + LLM static analysis
-├── generate_fuzz_script.py  # Maps CWEs → SecLists wordlists → fuzz.sh
+├── seclist_selector.py      # LLM picks SecLists wordlists from the catalog
+├── generate_fuzz_script.py  # (API, source) + finding → SecLists wordlists → fuzz.sh
 ├── parse_fuzz_results.py    # Parses ffuf JSON outputs into fuzz_report.json
 ├── server.py                # MCP server exposing the three tools above
 └── client.py                # MCP client that orchestrates the full pipeline
 
+tools/
+├── build_seclists_catalog.py # (Re)generate data/seclists_catalog.txt
+└── generate_rest_file.py      # Generate api.http from the MCP tools
+
 data/
 ├── kb/rag_chunks.zip        # Pre-built knowledge base (CWE/CVE chunks + embeddings)
-└── cwe/cwec_v4.19.1.xml     # Full CWE taxonomy reference
+├── cwe/cwec_v4.19.1.xml     # Full CWE taxonomy reference
+├── seclists_catalog.txt     # Catalog of SecLists wordlists shown to the selector LLM
+└── cwe_wordlist_map.json    # Static CWE → SecLists fallback map (used if the LLM is down)
 
 results/
 ├── reports/vuln_report.json # Output of vuln_scanner
@@ -62,8 +69,11 @@ pip install fastmcp sentence-transformers pandas numpy flask
 
 **Pull the LLM model:**
 ```bash
-ollama pull llama3
+ollama pull qwen3
 ```
+(Any local Ollama model works — override with `--model <tag>` or the `OLLAMA_MODEL`
+env var. The pipeline uses Ollama's `/api/chat`, so the model's own chat template
+is applied automatically; no model-specific prompt formatting is hard-coded.)
 
 ---
 
@@ -75,7 +85,7 @@ All paths and endpoints can be overridden via environment variables. Defaults wo
 |---|---|---|
 | `CHUNKS_ZIP` | `data/kb/rag_chunks.zip` | Path to knowledge base archive |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama API endpoint |
-| `OLLAMA_MODEL` | `llama3` | Model tag to use |
+| `OLLAMA_MODEL` | `qwen3` | Model tag to use |
 | `REPORT_PATH` | `results/reports/vuln_report.json` | Where to write the vulnerability report |
 | `TOP_K` | `5` | Number of RAG chunks to retrieve per query |
 
@@ -106,6 +116,9 @@ python src/generate_fuzz_script.py \
     --target-url http://host.docker.internal:5055/user/FUZZ
 # Output: results/scripts/fuzz.sh
 ```
+By default the LLM selects the SecLists wordlists from `data/seclists_catalog.txt`.
+Pass `--no-use-llm` to use the static `data/cwe_wordlist_map.json` map instead.
+Regenerate the catalog any time with `python tools/build_seclists_catalog.py`.
 
 **Step 4: Build the Docker image (once)**
 ```bash
@@ -155,7 +168,7 @@ The MCP server (`server.py`) exposes three tools — `analyze_code`, `generate_f
 **`vuln_report.json`** — vulnerability analysis results
 ```json
 {
-  "meta": { "tool": "...", "model": "llama3", "scan_date": "...", "duration_s": 12.4 },
+  "meta": { "tool": "...", "model": "qwen3", "scan_date": "...", "duration_s": 12.4 },
   "summary": { "total_findings": 2, "by_severity": { "HIGH": 1, "MEDIUM": 1 } },
   "results": [
     {

@@ -1,5 +1,5 @@
 {
-    "_comment": "CWE → SecLists wordlist mapping. Paths are relative to the SecLists root (SECLISTS_PATH env var in server.py; /SecLists inside Docker for generate_fuzz_script.py). Edit this file to add, remove, or update wordlists per CWE without touching any Python code.",
+    "_comment": "FALLBACK CWE → SecLists wordlist map. Used only when the LLM selector (src/seclist_selector.py) is disabled (--no-use-llm) or unreachable. Paths are relative to the SecLists root (/SecLists inside Docker). Primary wordlist selection is now done by the language model against data/seclists_catalog.txt.",
     "CWE-89": [
         "Fuzzing/Databases/SQLi/MySQL-SQLi-Login-Bypass.fuzzdb.txt",
         "Fuzzing/Databases/SQLi/Generic-SQLi.txt"

@@ -1,9 +1,21 @@
 """
 generate_fuzz_script.py — Standalone fuzz.sh generator
 ========================================================
-Reads results/reports/vuln_report.json produced by vuln_scanner.py, maps each unique
-CWE ID to the relevant SecLists wordlists, and writes a fuzz.sh shell
-script containing all ffuf commands ready to run inside Docker.
+Reads results/reports/vuln_report.json produced by vuln_scanner.py and writes a
+fuzz.sh shell script containing all ffuf commands ready to run inside Docker.
+
+Wordlist selection (which SecLists list to fuzz each finding with):
+  * --use-llm  (default) — hand the (API, API source code) pair plus the
+                vulnerability finding and a catalog of available SecLists
+                wordlists to a language model (via src/seclist_selector.py),
+                and let it pick the most relevant wordlist(s). Every chosen
+                path is validated against the catalog. Falls back to the
+                static map below if the model is unreachable or returns
+                nothing valid.
+  * --no-use-llm — skip the model and look up SecLists wordlist paths directly
+                in data/cwe_wordlist_map.json.
+
+Either way ffuf is fed /SecLists/<path> inside the container.
 
 Usage:
     python src/generate_fuzz_script.py [options]
@@ -14,12 +26,11 @@ Options:
                           [default: http://host.docker.internal:5055/user/FUZZ]
     --output       PATH   Output path for fuzz.sh   [default: ./results/scripts/fuzz.sh]
     --match-codes  STR    HTTP codes to treat as hits [default: 200]
-    --max-wordlists INT   Max wordlists per CWE       [default: 1]
+    --max-wordlists INT   Max wordlists per CWE [default: 2]
     --no-url-encode       Disable URL encoding of payloads
-
-Example:
-    python src/generate_fuzz_script.py --report results/reports/vuln_report.json \\
-        --target-url http://host.docker.internal:5055/user/FUZZ
+    --use-llm / --no-use-llm   Toggle the LLM wordlist selector (default: on)
+    --model        STR    Ollama model name for selection [default: qwen3]
+    --catalog      PATH   SecLists catalog file [default: ./data/seclists_catalog.txt]
 
 Then run the Docker container:
     docker build -t vuln-fuzzer .
@@ -36,12 +47,18 @@ Then parse the results:
 
 import argparse
 import json
-import os
+import re
 import stat
+import sys
 from pathlib import Path
 
-# ── CWE → SecLists wordlist mapping ───────────────────────────────────────────
-# Loaded from data/cwe_wordlist_map.json — edit that file to add/change wordlists.
+# Make sibling module importable when running this file directly.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from seclist_selector import DEFAULT_MODEL, load_catalog, select_wordlists  # noqa: E402
+
+# ── CWE → SecLists wordlist mapping (fallback only) ──────────────────────────
+# Loaded from data/cwe_wordlist_map.json — used when the LLM selector is
+# disabled or unavailable.
 _MAP_PATH = Path(__file__).resolve().parent.parent / "data" / "cwe_wordlist_map.json"
 with _MAP_PATH.open() as _f:
     CWE_WORDLIST_MAP: dict = json.load(_f)
@@ -51,18 +68,23 @@ SEVERITY_RANK = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "INFO": 0}
 
 def build_ffuf_cmd(
     target_url: str,
-    wordlist_rel: str,
     cwe_id: str,
+    wordlist_rel: str,
+    out_tag: str | None = None,
     match_codes: str = "200",
     threads: int = 20,
     timeout: int = 10,
     url_encode: bool = True,
 ) -> str:
-    """Build a single ffuf command string using container-internal paths."""
+    """Build a single ffuf command string using container-internal paths.
+
+    ``wordlist_rel`` is a SecLists-relative path (e.g.
+    ``Fuzzing/Databases/SQLi/Generic-SQLi.txt``) fed as ``/SecLists/<rel>``.
+    """
     safe_cwe = cwe_id.replace("-", "_")
-    wl_stem  = Path(wordlist_rel).stem
-    out_path = f"/results/ffuf_{safe_cwe}_{wl_stem}.json"
     wordlist = f"/SecLists/{wordlist_rel}"
+    tag = out_tag or Path(wordlist_rel).stem
+    out_path = f"/results/ffuf_{safe_cwe}_{tag}.json"
 
     parts = [
         "ffuf",
@@ -81,6 +103,83 @@ def build_ffuf_cmd(
     return " ".join(parts)
 
 
+def _load_function_source(report: dict, result: dict) -> str:
+    """
+    Slice the function source out of the original target file using line_start
+    and line_end from the result entry. Falls back to "" on any error so the
+    model gets minimal context but the pipeline doesn't crash.
+    """
+    target_path = report.get("meta", {}).get("target")
+    if not target_path:
+        return ""
+    try:
+        src = Path(target_path).read_text()
+    except OSError:
+        return ""
+
+    lines = src.splitlines()
+    start = max(1, int(result.get("line_start") or 1))
+    end = int(result.get("line_end") or len(lines))
+    end = max(end, start)
+    return "\n".join(lines[start - 1:end])
+
+
+_ROUTE_RE = re.compile(
+    r'@\w+\.(get|post|put|delete|patch|route)\s*\(\s*[\'"]([^\'"]+)[\'"]'
+)
+
+
+def _extract_api_info(report: dict, result: dict, target_url: str) -> dict:
+    """
+    Recover the (API) half of the (API, source) pair: the route path and HTTP
+    method declared by the decorator(s) above the vulnerable function. Best
+    effort — returns what it can, empty strings otherwise.
+    """
+    info = {
+        "endpoint":   "",
+        "method":     "",
+        "target_url": target_url,
+        "function":   result.get("function", ""),
+    }
+    target_path = report.get("meta", {}).get("target")
+    line_start = result.get("line_start")
+    if not target_path or not line_start:
+        return info
+    try:
+        lines = Path(target_path).read_text().splitlines()
+    except OSError:
+        return info
+
+    # Walk upward from the `def` line collecting contiguous decorator lines.
+    idx = int(line_start) - 2  # line directly above the def (0-based)
+    decorators: list[str] = []
+    while idx >= 0:
+        s = lines[idx].strip()
+        if s.startswith("@"):
+            decorators.insert(0, s)
+            idx -= 1
+        elif s == "":
+            idx -= 1
+        else:
+            break
+
+    for dec in decorators:
+        m = _ROUTE_RE.search(dec)
+        if not m:
+            continue
+        verb, path = m.group(1), m.group(2)
+        info["endpoint"] = path
+        if verb == "route":
+            mm = re.search(r"methods\s*=\s*\[([^\]]*)\]", dec)
+            info["method"] = (
+                mm.group(1).replace('"', "").replace("'", "").strip() if mm else "GET"
+            )
+        else:
+            info["method"] = verb.upper()
+        break
+    return info
+
+
 def generate_fuzz_script(
     report_path: Path,
     target_url: str,
@@ -88,6 +187,9 @@ def generate_fuzz_script(
     match_codes: str,
     max_wordlists: int,
     url_encode: bool,
+    use_llm: bool = True,
+    model: str = DEFAULT_MODEL,
+    catalog_path: Path | None = None,
 ) -> None:
     # ── Load and validate vuln_report.json ────────────────────────────────────
     if not report_path.exists():
@@ -102,33 +204,39 @@ def generate_fuzz_script(
 
     report = json.loads(report_path.read_text())
 
-    # ── Collect all findings ───────────────────────────────────────────────────
-    all_findings = [
-        f
-        for result in report.get("results", [])
-        for f in result.get("findings", [])
-    ]
+    catalog = load_catalog(catalog_path) if catalog_path else load_catalog()
+    if use_llm and not catalog:
+        print("[WARN] SecLists catalog is empty/missing — falling back to the static map.")
+        print("       Regenerate it with: python tools/build_seclists_catalog.py")
 
-    if not all_findings:
+    # ── Collect (finding, result) pairs so we keep the file/line context ───────
+    pairs: list[tuple[dict, dict]] = []
+    for result in report.get("results", []):
+        for f in result.get("findings", []):
+            pairs.append((f, result))
+
+    if not pairs:
         print("[WARN] No findings in report — fuzz.sh will be empty.")
 
     # ── Deduplicate CWE IDs, keep highest-severity per CWE ────────────────────
-    cwe_seen: dict[str, dict] = {}
-    for f in sorted(
-        all_findings,
-        key=lambda x: SEVERITY_RANK.get(x.get("severity", "LOW"), 0),
+    cwe_seen: dict[str, tuple[dict, dict]] = {}
+    for f, result in sorted(
+        pairs,
+        key=lambda fr: SEVERITY_RANK.get(fr[0].get("severity", "LOW"), 0),
         reverse=True,
     ):
         cid = f.get("cwe_id", "")
         if cid and cid not in cwe_seen:
-            cwe_seen[cid] = f
+            cwe_seen[cid] = (f, result)
 
     # ── Build script lines ────────────────────────────────────────────────────
+    mode_str = f"llm={model}" if use_llm else "static-map"
     script_lines = [
         "#!/usr/bin/env bash",
         "# Auto-generated by generate_fuzz_script.py — do not edit manually",
         f"# Report : {report_path.resolve()}",
         f"# Target : {target_url}",
+        f"# Mode   : {mode_str}",
         f"# CWEs   : {', '.join(cwe_seen.keys()) or 'none'}",
         "",
         "set -euo pipefail",
@@ -138,27 +246,36 @@ def generate_fuzz_script(
 
     jobs_written = 0
 
-    for cwe_id, finding in cwe_seen.items():
-        wordlist_rels = CWE_WORDLIST_MAP.get(
-            cwe_id, CWE_WORDLIST_MAP["_default"]
-        )[:max_wordlists]
-
+    for cwe_id, (finding, result) in cwe_seen.items():
         cwe_name = finding.get("cwe_name", "")
-        script_lines.append(
-            f"echo '[fuzz] Running {cwe_id} — {cwe_name}'"
-        )
+        script_lines.append(f"echo '[fuzz] Running {cwe_id} — {cwe_name}'")
+
+        if use_llm and catalog:
+            function_source = _load_function_source(report, result)
+            api_info = _extract_api_info(report, result, target_url)
+            wordlist_rels, source = select_wordlists(
+                finding=finding,
+                function_source=function_source,
+                api_info=api_info,
+                catalog=catalog,
+                model=model,
+                max_wordlists=max_wordlists,
+            )
+        else:
+            wordlist_rels = CWE_WORDLIST_MAP.get(cwe_id, CWE_WORDLIST_MAP["_default"])[:max_wordlists]
+            source = "static-map"
 
         for wl_rel in wordlist_rels:
             cmd = build_ffuf_cmd(
                 target_url=target_url,
-                wordlist_rel=wl_rel,
                 cwe_id=cwe_id,
+                wordlist_rel=wl_rel,
                 match_codes=match_codes,
                 url_encode=url_encode,
             )
             script_lines.append(cmd)
             jobs_written += 1
-            print(f"  [{cwe_id}] {wl_rel.split('/')[-1]}")
+            print(f"  [{cwe_id}] {wl_rel} ({source})")
 
         script_lines.append("")
 
@@ -206,12 +323,28 @@ def parse_args():
         help="HTTP status codes to treat as hits (default: 200)",
     )
     p.add_argument(
-        "--max-wordlists", type=int, default=1,
-        help="Max wordlists per CWE ID (default: 1)",
+        "--max-wordlists", type=int, default=2,
+        help="Max wordlists per CWE ID (default: 2)",
     )
     p.add_argument(
         "--no-url-encode", action="store_true",
         help="Disable URL encoding of payloads",
+    )
+    p.add_argument(
+        "--use-llm", dest="use_llm", action="store_true", default=True,
+        help="Use the LLM SecLists selector (default: on)",
+    )
+    p.add_argument(
+        "--no-use-llm", dest="use_llm", action="store_false",
+        help="Disable the LLM and use the static cwe_wordlist_map.json directly",
+    )
+    p.add_argument(
+        "--model", default=DEFAULT_MODEL,
+        help=f"Ollama model name for wordlist selection (default: {DEFAULT_MODEL})",
+    )
+    p.add_argument(
+        "--catalog", type=Path, default=None,
+        help="SecLists catalog file (default: ./data/seclists_catalog.txt)",
     )
     return p.parse_args()
 
@@ -221,6 +354,7 @@ if __name__ == "__main__":
     print(f"[generate] Reading report : {args.report}")
     print(f"[generate] Target URL     : {args.target_url}")
     print(f"[generate] Output         : {args.output}")
+    print(f"[generate] Mode           : {'llm=' + args.model if args.use_llm else 'static-map'}")
     print()
     generate_fuzz_script(
         report_path=args.report,
@@ -229,4 +363,7 @@ if __name__ == "__main__":
         match_codes=args.match_codes,
         max_wordlists=args.max_wordlists,
         url_encode=not args.no_url_encode,
+        use_llm=args.use_llm,
+        model=args.model,
+        catalog_path=args.catalog,
     )

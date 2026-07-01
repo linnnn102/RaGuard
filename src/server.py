@@ -3,9 +3,9 @@ MCP vulnerability analysis server
 =======================================================
 Exposes three tools via the MCP protocol (fastmcp):
 
-  1. analyze_code        — RAG + Llama 3 static vulnerability analysis
+  1. analyze_code        — RAG + Qwen 3 static vulnerability analysis
   2. fuzz_target         — ffuf fuzzing guided by Tool 1 report
-  3. suggest_mitigations — RAG + Llama 3 code-level fix suggestions
+  3. suggest_mitigations — RAG + Qwen 3 code-level fix suggestions
 
 Usage:
     python src/server.py
@@ -44,12 +44,13 @@ from vuln_scanner import (
     save_json_report,
     SEVERITY_RANK,
     SYSTEM_PROMPT,
+    DEFAULT_MODEL,
 )
 # ── CONFIG ─────────────────────────────────────────────────────────────────────
 CONFIG = {
     "chunks_zip"   : Path(os.getenv("CHUNKS_ZIP",    str(PROJECT_ROOT / "data/kb/rag_chunks.zip"))),
     "ollama_url"   : os.getenv("OLLAMA_URL",          "http://localhost:11434"),
-    "ollama_model" : os.getenv("OLLAMA_MODEL",         "llama3"),
+    "ollama_model" : os.getenv("OLLAMA_MODEL",         DEFAULT_MODEL),
     "seclists_path": Path(os.getenv("SECLISTS_PATH",  str(PROJECT_ROOT / "lib/SecLists"))),
     "ffuf_bin"     : os.getenv("FFUF_BIN",             "ffuf"),
     "report_path"  : Path(os.getenv("REPORT_PATH",    str(PROJECT_ROOT / "results/reports/vuln_report.json"))),
@@ -118,7 +119,7 @@ def analyze_code(
 ) -> dict:
     """
     Statically analyze a Python file for security vulnerabilities using
-    RAG-augmented Llama 3. Extracts each function, retrieves relevant
+    RAG-augmented Qwen 3. Extracts each function, retrieves relevant
     CWE/CVE context, and asks the LLM to identify vulnerabilities.
 
     Args:
@@ -163,7 +164,7 @@ def analyze_code(
         prompt  = build_prompt(fn, context)
 
         try:
-            raw = llm.generate(prompt)
+            raw = llm.chat(SYSTEM_PROMPT, prompt)
         except Exception as e:
             all_results.append({"function": fn, "findings": [], "error": str(e)})
             continue
@@ -227,12 +228,9 @@ def fuzz_target() -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _mitigation_prompt(finding: dict, fn_source: str, context: str) -> str:
-    """Build a Llama 3 prompt for mitigation suggestions."""
+    """Build the user message for mitigation suggestions. Model-agnostic — the
+    system prompt and chat template are applied by Ollama (OllamaClient.chat)."""
     return (
-        f"<|begin_of_text|>"
-        f"<|start_header_id|>system<|end_header_id|>\n\n"
-        f"{MITIGATION_SYSTEM_PROMPT}<|eot_id|>"
-        f"<|start_header_id|>user<|end_header_id|>\n\n"
         f"Vulnerability finding:\n"
         f"  CWE: {finding['cwe_id']} — {finding.get('cwe_name','')}\n"
         f"  Severity: {finding['severity']}\n"
@@ -243,8 +241,6 @@ def _mitigation_prompt(finding: dict, fn_source: str, context: str) -> str:
         f"CWE/CVE reference context:\n{context}\n\n"
         f"Respond ONLY with a JSON object containing: "
         f"explanation, fixed_code, hardening (array), references (array)."
-        f"<|eot_id|>"
-        f"<|start_header_id|>assistant<|end_header_id|>\n\n"
     )
 
 # ── Triple-quote fixer ─────────────────────────────────────────────────────────
@@ -253,6 +249,8 @@ def _mitigation_prompt(finding: dict, fn_source: str, context: str) -> str:
 def _raw_parser(s: str) -> str:
     # Parse JSON — LLM returns a single object not an array here
     text = s.strip()
+    # Drop any reasoning block emitted by thinking models (e.g. Qwen 3).
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
     text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
     text = re.sub(r"\s*```$", "", text, flags=re.MULTILINE)
     text = text.strip()
@@ -265,7 +263,7 @@ def _raw_parser(s: str) -> str:
         inner = inner.replace("\r", "\\r")
         inner = inner.replace("\t", "\\t")
         return f'"{inner}"'
-    return re.sub(r'"""(.*?)"""', replacer, s, flags=re.DOTALL)
+    return re.sub(r'"""(.*?)"""', replacer, text, flags=re.DOTALL)
 
 
 @mcp.tool()
@@ -276,7 +274,7 @@ def suggest_mitigations(
 ) -> dict:
     """
     For each vulnerability in the analyze_code report, retrieve RAG context
-    and ask Llama 3 to produce a concrete code fix and hardening advice.
+    and ask Qwen 3 to produce a concrete code fix and hardening advice.
 
     Args:
         report_path:  Path to vuln_report.json. Defaults to Tool 1 output path.
@@ -338,7 +336,7 @@ def suggest_mitigations(
             prompt  = _mitigation_prompt(finding, fn_source, context)
 
             try:
-                raw = llm.generate(prompt, max_retries=2)
+                raw = llm.chat(MITIGATION_SYSTEM_PROMPT, prompt, max_retries=2)
             except Exception as e:
                 mitigations.append({
                     "function": fn_name,
