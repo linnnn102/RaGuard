@@ -4,7 +4,7 @@ vuln_scanner.py — RAG-powered vulnerability scanner
 Scans a Python file function-by-function using:
   - CWE/CVE knowledge base (Parquet + numpy from Colab)
   - nomic-embed-text for retrieval
-  - Llama 3 via Ollama for analysis
+  - Qwen 3 (or any local model) via Ollama for analysis
 
 Usage:
     python src/vuln_scanner.py <target.py> [options]
@@ -13,7 +13,7 @@ Options:
     --chunks-zip   PATH   Path to rag_chunks.zip from Colab  [default: ./data/kb/rag_chunks.zip]
     --chunks-dir   PATH   Or point directly at an unzipped folder
     --output       PATH   JSON report output path            [default: ./results/reports/vuln_report.json]
-    --model        STR    Ollama model tag                   [default: llama3]
+    --model        STR    Ollama model tag                   [default: qwen3]
     --ollama-url   URL    Ollama base URL                    [default: http://localhost:11434]
     --min-severity STR    Skip findings below this level     [default: LOW]
     --top-k        INT    Chunks to retrieve per function    [default: 6]
@@ -243,23 +243,23 @@ Do not include any text outside the JSON array.\
 """
 
 def build_prompt(fn: dict, context: str) -> str:
+    """Build the user message. Model-agnostic — no chat special tokens; the
+    system prompt and chat template are applied by Ollama (see OllamaClient.chat)."""
     return (
-        f"<|begin_of_text|>"
-        f"<|start_header_id|>system<|end_header_id|>\n\n{SYSTEM_PROMPT}<|eot_id|>"
-        f"<|start_header_id|>user<|end_header_id|>\n\n"
         f"Analyze the following Python function for security vulnerabilities.\n"
         f"Use the CWE/CVE reference context below to ground your findings.\n\n"
         f"--- FUNCTION: {fn['name']} (line {fn['lineno']}) ---\n"
         f"```python\n{fn['source']}\n```\n\n"
         f"--- CWE/CVE REFERENCE CONTEXT ---\n{context}\n\n"
         f"Respond ONLY with a JSON array of findings (or [] if none)."
-        f"<|eot_id|>"
-        f"<|start_header_id|>assistant<|end_header_id|>\n\n"
     )
 
 
+DEFAULT_MODEL = "qwen3"
+
+
 class OllamaClient:
-    def __init__(self, base_url: str = "http://localhost:11434", model: str = "llama3"):
+    def __init__(self, base_url: str = "http://localhost:11434", model: str = DEFAULT_MODEL):
         self.base_url = base_url.rstrip("/")
         self.model    = model
         self._check_connection()
@@ -286,33 +286,52 @@ class OllamaClient:
             ))
             sys.exit(1)
 
-    def generate(self, prompt: str, max_retries: int = 2) -> str:
-        payload = {
-            "model":  self.model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature":        0.1,
-                "repeat_penalty":     1.15,
-                "num_predict":        1024,
-                "stop": ["<|eot_id|>", "<|end_of_text|>"],
-            },
+    def chat(self, system: str, user: str, max_retries: int = 2) -> str:
+        """Send a system+user chat turn via /api/chat.
+
+        Uses the model's own chat template (no hard-coded special tokens), so it
+        works across Qwen, Llama, etc. Reasoning models such as Qwen 3 emit
+        <think>…</think> by default, which bloats output and breaks JSON parsing;
+        we pass think=False to disable it, and transparently retry without the
+        flag if the model/Ollama version rejects it.
+        """
+        options = {
+            "temperature":    0.1,
+            "repeat_penalty": 1.15,
+            "num_predict":    1024,
         }
+        use_think_flag = True
         for attempt in range(max_retries + 1):
+            payload = {
+                "model":    self.model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user",   "content": user},
+                ],
+                "stream":  False,
+                "options": options,
+            }
+            if use_think_flag:
+                payload["think"] = False
             try:
                 r = requests.post(
-                    f"{self.base_url}/api/generate",
+                    f"{self.base_url}/api/chat",
                     json=payload,
                     timeout=120,
                 )
+                if r.status_code == 400 and use_think_flag:
+                    # Model doesn't support the think flag — drop it and retry.
+                    use_think_flag = False
+                    continue
                 r.raise_for_status()
-                return r.json().get("response", "")
+                return r.json().get("message", {}).get("content", "")
             except requests.Timeout:
                 if attempt < max_retries:
                     print(col(f"  [Ollama] Timeout, retrying ({attempt+1}/{max_retries})...", C.YELLOW))
                     time.sleep(2)
                 else:
                     raise
+        return ""
 
 
 # ── JSON extraction from LLM output ───────────────────────────────────────────
@@ -323,6 +342,9 @@ def extract_json_array(text: str) -> list[dict]:
     Handles markdown code fences, leading/trailing text, and partial JSON.
     """
     text = text.strip()
+
+    # Strip any reasoning block emitted by thinking models (e.g. Qwen 3)
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
     # Strip markdown fences
     text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
@@ -576,7 +598,7 @@ def scan_file(
         # Build prompt and query LLM
         prompt = build_prompt(fn, context)
         try:
-            raw_response = llm.generate(prompt)
+            raw_response = llm.chat(SYSTEM_PROMPT, prompt)
         except Exception as e:
             print(col(f"ERROR ({e})", C.RED))
             results.append({"function": fn, "findings": [], "error": str(e)})
@@ -620,7 +642,7 @@ def scan_file(
 def parse_args():
     project_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(
-        description="RAG-powered Python vulnerability scanner using Llama 3 + Ollama",
+        description="RAG-powered Python vulnerability scanner using Qwen 3 + Ollama",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -636,8 +658,8 @@ def parse_args():
         type=Path, default=project_root / "results/reports/vuln_report.json",
         help="JSON report output path (default: ./results/reports/vuln_report.json)")
     parser.add_argument("--model",
-        default="llama3",
-        help="Ollama model tag (default: llama3)")
+        default=DEFAULT_MODEL,
+        help=f"Ollama model tag (default: {DEFAULT_MODEL})")
     parser.add_argument("--ollama-url",
         default="http://localhost:11434",
         help="Ollama base URL (default: http://localhost:11434)")

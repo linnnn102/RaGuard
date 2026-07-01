@@ -39,5 +39,11 @@ results/fuzz/
 results/scripts/fuzz.sh
 results/reports/*.json
 
+# SQLite databases (runtime artifacts)
+*.db
+
 # target file 
 targets/test_target2.py
+
+# chunking & fine tuning code
+pre_code/
