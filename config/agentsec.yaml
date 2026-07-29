@@ -1,0 +1,94 @@
+# agentsec router — S4 single source of truth (DEFAULT: fully local)
+# ==================================================================
+# One versioned file that replaces the scattered DEFAULT_MODEL="qwen3" constants
+# and the server.py env block. The orchestrator (generalist LLM) and the three
+# task specialists (SLMs) are all resolved from here. Bump `version` and select
+# a config with AGENTSEC_CONFIG=<path> for one-variable rollback (S6).
+#
+# ${VAR} and ${VAR:-default} are expanded from the environment at load time so
+# URLs / API keys never live in the repo.
+#
+# This DEFAULT runs everything LOCALLY — a Qwen3 generalist orchestrator served
+# by Ollama, deciding which small Qwen3 specialist to call. No cloud key needed.
+# To use the GLM5 cloud orchestrator instead, select the optional config:
+#   AGENTSEC_CONFIG=config/agentsec.glm.yaml python -m agentsec.cli scan ...
+
+version: v2
+
+logging:
+  enabled: true
+  dir: logs/calls          # S1 — append-only JSONL, one file per task
+
+# Generalist orchestrator: runs the agentic tool-calling loop (Figure-1-Right).
+# Local Qwen3 via Ollama. Tool calling requires the OpenAI-compatible path, so
+# backend is `openai` pointed at Ollama's /v1 endpoint with a dummy key.
+#
+# Pick the orchestrator size for your RAM:
+#   8 GB  -> qwen3:4b     16 GB -> qwen3:8b
+#   24 GB -> qwen3:14b    32 GB+ -> qwen3:30b-a3b
+# Pull it first:  ollama pull qwen3:8b
+orchestrator:
+  backend: openai                              # OpenAI-compatible → tool calling
+  model: ${ORCH_MODEL:-qwen3:8b}               # the LOCAL generalist
+  base_url: ${OLLAMA_OPENAI_URL:-http://localhost:11434/v1}
+  api_key: ${OLLAMA_API_KEY:-ollama}           # Ollama ignores it, but the SDK needs a non-empty key
+  temperature: 0.2
+  max_steps: 12
+
+# Shared backend endpoints.
+backends:
+  ollama:
+    base_url: ${OLLAMA_URL:-http://localhost:11434}
+
+# Specialist SLMs — one route per narrow task. Point `model` at a fine-tuned
+# adapter tag (e.g. qwen3-analyze-v2) after S5 with zero code change.
+tasks:
+  # qwen3:8b (matches the original vuln_scanner default). The 4b model is too
+  # weak to reliably emit the required JSON findings — it reasons that the code
+  # is vulnerable but rambles past its token budget without producing the JSON
+  # array, so findings come back empty. A *fine-tuned* 4b adapter (S5) is the
+  # paper's intended way to shrink these specialists; use qwen3:8b until then.
+  analyze_code:
+    backend: ollama
+    model: ${ANALYZE_MODEL:-qwen3:8b}
+  select_wordlists:
+    backend: ollama
+    model: ${WORDLIST_MODEL:-qwen3:8b}
+  suggest_mitigations:
+    backend: ollama
+    model: ${MITIGATE_MODEL:-qwen3:8b}
+
+rag:
+  chunks_zip: data/kb/rag_chunks.zip
+  top_k: 6
+  # Embeddings are served by the SAME local Ollama that runs the orchestrator and
+  # the specialists — no HuggingFace Hub call, no trust_remote_code, no network.
+  # The KB manifest is authoritative for these; they only override it for
+  # deliberate experiments. Changing the model REQUIRES re-embedding the KB
+  # (`python scripts/reembed_kb.py`) so query and document vectors share a space.
+  embed_backend: ollama
+  # 0.6B, not the 8B default tag: measured 0.091 s/query vs 0.520 s, and
+  # retrieval runs on every specialist call. See src/embedders.py for numbers.
+  embed_model: ${EMBED_MODEL:-qwen3-embedding:0.6b}
+
+fuzz:
+  # Inside the compose network the runner reaches the target by SERVICE NAME
+  # (real container-to-container traffic). The default below keeps a host-side
+  # run working; docker-compose.yml overrides it to http://target:5055/... for
+  # the containerised runner.
+  target_url: ${FUZZ_TARGET_URL:-http://host.docker.internal:5055/user/FUZZ}
+  # What counts as a "hit". Default is error-based detection: match server
+  # errors (HTTP 5xx), i.e. payloads that broke the SQL query — strong, low-noise
+  # evidence the input reaches the parser unsanitised (an injection point).
+  #
+  # Why not match 200 / size anomalies: this endpoint returns 200 for almost any
+  # input AND reflects the input in the response body, so response size tracks the
+  # payload — which defeats ffuf's size auto-calibration (-ac) and floods the
+  # report with false positives. Error-based matching sidesteps that entirely.
+  #
+  # For a non-reflective endpoint, set autocalibrate: true (uses -mc all -ac) to
+  # catch boolean-based injections by anomalous response size instead.
+  autocalibrate: false
+  match_codes: "500"
+  max_wordlists: 2
+  catalog: data/seclists_catalog.txt

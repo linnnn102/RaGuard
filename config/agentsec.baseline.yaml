@@ -1,0 +1,47 @@
+# agentsec router — EVAL ARM 1: LLM-only homogeneous baseline
+# ============================================================
+# One SLM (qwen3) serves every task, run in the fixed legacy order via
+# run_sequential (no orchestrator deciding). This is the "before" arm the thesis
+# compares the heterogeneous agentic system (config/agentsec.yaml) against.
+#
+# Run it with:
+#   python eval/run_eval.py --run --arm baseline=config/agentsec.baseline.yaml:seq ...
+
+version: baseline
+
+logging:
+  enabled: true
+  dir: logs/eval/baseline
+
+# Present but unused in sequential mode — kept valid so the config loads.
+orchestrator:
+  backend: ollama
+  model: ${BASELINE_MODEL:-qwen3}
+  base_url: ${OLLAMA_URL:-http://localhost:11434}
+  temperature: 0.2
+  max_steps: 12
+
+backends:
+  ollama:
+    base_url: ${OLLAMA_URL:-http://localhost:11434}
+
+tasks:
+  analyze_code:
+    backend: ollama
+    model: ${BASELINE_MODEL:-qwen3}
+  select_wordlists:
+    backend: ollama
+    model: ${BASELINE_MODEL:-qwen3}
+  suggest_mitigations:
+    backend: ollama
+    model: ${BASELINE_MODEL:-qwen3}
+
+rag:
+  chunks_zip: data/kb/rag_chunks.zip
+  top_k: 6
+
+fuzz:
+  target_url: ${FUZZ_TARGET_URL:-http://host.docker.internal:5055/user/FUZZ}
+  match_codes: "200"
+  max_wordlists: 2
+  catalog: data/seclists_catalog.txt

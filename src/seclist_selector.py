@@ -32,6 +32,7 @@ Paths are relative to the SecLists root, exactly as ffuf consumes them
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Optional
@@ -42,7 +43,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CATALOG_PATH = PROJECT_ROOT / "data" / "seclists_catalog.txt"
 _MAP_PATH = PROJECT_ROOT / "data" / "cwe_wordlist_map.json"
 
-DEFAULT_OLLAMA_URL = "http://localhost:11434"
+# Honour OLLAMA_URL so this works inside the runner container, where "localhost"
+# is the container itself and Ollama lives on the host gateway. Without this the
+# selector silently fell back to the static CWE map for EVERY finding — the
+# pipeline still produced a runnable fuzz.sh, so the failure was invisible
+# except for "(fallback)" in the log.
+DEFAULT_OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 DEFAULT_MODEL = "qwen3"
 
 # Fallback map — used only when the model is unreachable or returns no valid

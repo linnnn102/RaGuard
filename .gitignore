@@ -17,6 +17,16 @@ ENV/
 .coverage.*
 htmlcov/
 
+# Packaging artifacts
+*.egg-info/
+build/
+dist/
+
+# Local agent tooling (worktrees, vendored skill library)
+.claude/
+.agents/
+skills-lock.json
+
 # Local environment and secrets
 .env
 .env.*
@@ -33,6 +43,13 @@ Thumbs.db
 *.log
 *.tmp
 *.swp
+*.bak
+
+# S1 call logs (regenerated every run; curated datasets are the artifact)
+logs/
+
+# Local scratch notes
+actionitems.txt
 
 # Generated pipeline outputs
 results/fuzz/

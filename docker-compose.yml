@@ -1,0 +1,269 @@
+# docker-compose.yml — the whole RaGuard workflow in one command.
+# =====================================================================
+#
+#   docker compose up --build         # runs the ENTIRE pipeline. That's it.
+#   docker compose down               # stop & remove
+#
+# Two services containers:
+#
+#   * target — the vulnerable Flask app (RCE via command
+#     injection, pickle deserialization, SSTI, SSRF). Long-lived and hardened
+#     per the OWASP Docker Security Cheat Sheet, so a payload that lands during
+#     fuzzing executes in a throwaway sandbox, not on your machine.
+#
+#   * runner — the pipeline itself: the agentsec orchestrator, the specialist
+#     SLM calls, AND ffuf + SecLists. Runs to completion, then exits.
+#
+# HOW THEY TALK
+# -------------
+# They share the compose network, so the runner reaches the target by SERVICE
+# NAME at http://target:5055 — container-to-container traffic.
+#
+# Previously the fuzzer was launched by the pipeline with a bare `docker run`,
+# which put it on the DEFAULT bridge network while the target sat on the compose
+# network. The two could not see each other, so traffic had to hairpin out to
+# host.docker.internal and back in through the published port. That is why the
+# published port used to be load-bearing and could not be pinned to loopback.
+# It now can be (see `ports:` below).
+#
+# WHY THE PIPELINE ISN'T SPAWNING CONTAINERS ANY MORE
+# ---------------------------------------------------
+# A containerised orchestrator can only run `docker run` if you mount
+# /var/run/docker.sock — which grants it effective root on the host and would
+# undo every hardening measure below. Instead the runner image bundles ffuf +
+# SecLists, so the fuzz step executes `bash fuzz.sh` in-process. No socket, no
+# nested Docker. The standalone `vuln-fuzzer` image is still built under the
+# `tools` profile for host-side runs (fuzz.py auto-detects which mode it is in).
+#
+services:
+  target:
+    build:
+      context: ./targets
+      dockerfile: Dockerfile
+      args:
+        # Swap the served app here, e.g. APP: test_target2.py
+        APP: vuln_dashboard.py
+    image: vuln-target
+    container_name: raguard-target
+    ports:
+      # Pinned to LOOPBACK: the runner no longer needs this publish (it reaches
+      # the target over the compose network by service name), so the
+      # deliberately-vulnerable app is not exposed to your LAN. It stays
+      # published only so you can curl it from the host for the demo.
+      - "127.0.0.1:5055:5055"
+
+    # ── containment for a deliberately exploitable app ────────────────────────
+    # Hardened per the OWASP Docker Security Cheat Sheet. The goal is that an
+    # exploit LANDS (so the fuzzer can confirm it) but cannot reach the host.
+
+    # Rule 2 — rootless. The image already sets USER 10001; restate it here so
+    # the guarantee is visible at the deployment layer and survives a rebuilt
+    # image that forgets it. No user in the container maps to host uid 0.
+    user: "10001:10001"
+
+    # Rule 1 — never grant host-level access. `privileged` defaults to false;
+    # stated explicitly so a future edit has to consciously remove it.
+    privileged: false
+
+    # Rule 4 — drop every Linux capability. Verified: iputils `ping` (the
+    # CWE-78 endpoint's base command) works with NO capabilities at all via
+    # unprivileged ICMP datagram sockets, enabled by the ping_group_range
+    # sysctl below. So the previous `cap_add: [NET_RAW]` is no longer needed.
+    cap_drop:
+      - ALL
+    sysctls:
+      # Docker Desktop already defaults to this; native-Linux Docker defaults to
+      # "1 0" (disabled), so set it explicitly for portability. It lets gid 10001
+      # open SOCK_DGRAM ICMP sockets — ping without CAP_NET_RAW.
+      net.ipv4.ping_group_range: "0 2147483647"
+
+    # Rule 4 — a shell payload cannot escalate via setuid binaries or file
+    # capabilities. Also the reason the ping fix above had to be sysctl-based:
+    # no_new_privs blocks file-capability elevation outright.
+    security_opt:
+      - no-new-privileges:true
+
+    # Rule 8 — read-only root filesystem. The app code in /app becomes
+    # immutable: a landed RCE cannot drop a backdoor, patch the source, or
+    # persist anything across a restart. The two writable spots are tmpfs
+    # (RAM-backed, wiped on exit) and both are noexec+nosuid, so a payload
+    # cannot download a binary and execute it from them.
+    read_only: true
+    tmpfs:
+      # WORKDIR — where the target's SQLite DB is created. Fresh every run.
+      - /data:rw,noexec,nosuid,uid=10001,gid=10001,size=32m
+      - /tmp:rw,noexec,nosuid,size=16m
+
+    # Rule 7 — resource limits, so a fork bomb / memory hog / crypto miner
+    # landed through the target cannot DoS the host. These are the ceiling that
+    # keeps the container from taking the machine down; they are NOT meant to be
+    # tight enough that normal fuzzing trips them.
+    cpus: 1.0
+    # NOT 512m. The targets run Flask with debug=True (CWE-489, an intentional
+    # finding), and Werkzeug's debugger retains a traceback for EVERY 500 so its
+    # interactive console can reopen them. Fuzzing 500s on most payloads, so
+    # memory grows ~linearly with hits. Measured peak over a full run
+    # (~65k requests): 628 MiB, from a 55 MiB baseline. At 512m the target was
+    # OOM-killed (exit 247) partway through and every later ffuf job silently
+    # recorded connection errors instead of hits — a false negative in the
+    # report. 2g leaves ~3x headroom; fuzz.py also now detects a target that
+    # dies mid-run rather than reporting the truncated results as complete.
+    mem_limit: 2g
+    mem_reservation: 256m
+    pids_limit: 256                # cap the blast radius of a fork bomb
+    ulimits:
+      # NOT 1024. This target is deliberately hammered by ffuf (-t 20), and the
+      # Werkzeug dev server opens fds per connection; a 1024 ceiling exhausts
+      # mid-fuzz with "OSError: [Errno 24] Too many open files", which then
+      # cascades into an OOM (every failed request builds a debug traceback).
+      # The real host protection here is pids_limit + mem_limit, not nofile.
+      nofile:
+        soft: 65536
+        hard: 65536
+      nproc: 256
+      core: 0                      # no core dumps (they can leak memory contents)
+
+    init: true                     # reap the child processes RCE payloads spawn
+    restart: "no"
+
+    # The target's request log is NOT streamed to `docker compose up`. Every
+    # healthcheck logged a "GET /user/hc 200" line, and during fuzzing the app
+    # logs one line PER PAYLOAD — tens of thousands — which buried the
+    # pipeline's own progress. Logs are still captured: `docker compose logs
+    # target` (or `-f` to follow) shows everything, including the landed
+    # exploits, which is what you want for the demo.
+    attach: false
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5055/user/hc')"]
+      # Probe fast only while starting, so `depends_on: service_healthy` is
+      # satisfied within a couple of seconds; then back off to a rare liveness
+      # check. Previously a 10s interval ran for the whole session.
+      start_period: 30s
+      start_interval: 1s
+      interval: 5m
+      timeout: 3s
+      retries: 3
+
+  # ── the pipeline itself ──────────────────────────────────────────────────
+  # Runs to completion: analyze -> fuzz -> mitigate, then exits. This is what
+  # makes `docker compose up` the only command you need.
+  runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.runner
+      args:
+        # Match your host uid on native Linux so the bind-mounted results/ stays
+        # writable:  DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) docker compose up
+        RUNNER_UID: ${DOCKER_UID:-10001}
+        RUNNER_GID: ${DOCKER_GID:-10001}
+    image: raguard-runner
+    container_name: raguard-runner
+    user: "${DOCKER_UID:-10001}:${DOCKER_GID:-10001}"
+
+    # Wait for the target to be genuinely serving, not merely started — the
+    # healthcheck hits /user/hc. Without this the first analyze->fuzz cycle can
+    # race the Flask boot and record connection errors as "no hits".
+    depends_on:
+      target:
+        condition: service_healthy
+
+    environment:
+      # The target by service name over the compose network. This is the change
+      # that removes the host hairpin described at the top of this file.
+      FUZZ_TARGET_URL: http://target:5055/user/FUZZ
+      # Ollama runs on the HOST (it needs the GPU/Metal), so the runner reaches
+      # it through the host gateway. Both URL styles the config uses are set.
+      OLLAMA_URL: http://host.docker.internal:11434
+      OLLAMA_OPENAI_URL: http://host.docker.internal:11434/v1
+      EMBED_MODEL: ${EMBED_MODEL:-qwen3-embedding:0.6b}
+      PYTHONPATH: /app/src
+      # ffuf opens $HOME/.config/ffuf/scraper at startup. The runner user has no
+      # home directory and the rootfs is read-only, so point HOME at the tmpfs
+      # or every ffuf job dies with "open /.config/ffuf/scraper: no such file".
+      HOME: /tmp
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    volumes:
+      # Code and data are read-only: the pipeline must not mutate its own
+      # inputs, and the targets/ mount is the SOURCE it analyses.
+      - ./src:/app/src:ro
+      - ./config:/app/config:ro
+      - ./targets:/app/targets:ro
+      - ./data:/app/data:ro
+      - ./scripts:/app/scripts:ro
+      # Outputs are writable.
+      - ./results:/app/results
+      - ./logs:/app/logs
+      # fuzz.sh writes ffuf JSON to the absolute path /results (a container
+      # contract baked into the generated script), so mount it there too.
+      - ./results/fuzz:/results
+
+    # Same OWASP posture as the target. The runner handles model output and
+    # writes host-visible files, so it gets the same treatment.
+    privileged: false
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    cpus: 2.0
+    mem_limit: 2g
+    pids_limit: 512
+    restart: "no"
+    command:
+      - python
+      - -m
+      - agentsec.cli
+      - scan
+      - targets/vuln_dashboard.py
+      - --output
+      - results/reports/full_report.json
+
+  # Standalone ffuf image, kept for HOST-side runs (`--tool fuzz` outside
+  # compose). fuzz.py auto-detects: inside the runner it executes fuzz.sh
+  # directly; on the host it spawns this image. Build-only — never started by
+  # `docker compose up`.
+  fuzzer:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vuln-fuzzer
+    # Matching hardening for the job container. fuzz.py applies the equivalent
+    # flags on its `docker run` invocation; these apply if you run it by hand.
+    # The uid defaults are overridable because /results is a bind mount — on
+    # native-Linux Docker the container uid must be able to write the host dir,
+    # so fuzz.py passes the HOST's uid:gid. Match that here with:
+    #   DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) docker compose --profile tools run fuzzer
+    user: "${DOCKER_UID:-10001}:${DOCKER_GID:-10001}"
+    privileged: false
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    environment:
+      # ffuf opens $HOME/.config/ffuf/scraper at startup; an unset HOME resolves
+      # to "/", which is read-only. Point it at the tmpfs.
+      HOME: /tmp
+    cpus: 2.0
+    mem_limit: 1g
+    pids_limit: 512
+    command: ["bash", "/fuzz/fuzz.sh"]
+
+# Tighter option: to also cut the target's OUTBOUND internet access (blocks
+# reverse shells / data exfil, but also breaks the /fetch SSRF demo to the
+# public internet), attach it to an internal network:
+#
+#   services:
+#     target:
+#       networks: [sandbox]
+#   networks:
+#     sandbox:
+#       internal: true

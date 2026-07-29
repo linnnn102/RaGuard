@@ -1,0 +1,76 @@
+# RaGuard pipeline runner — the whole workflow in ONE container.
+# ==============================================================
+# `docker compose up` starts this next to the hardened target and runs the full
+# analyze -> fuzz -> mitigate pipeline. No other commands.
+#
+# WHY THIS IMAGE EXISTS
+# ---------------------
+# The pipeline used to run on the host and shell out to `docker run vuln-fuzzer`
+# for the fuzz step. Moving the pipeline itself into a container would mean that
+# nested `docker run` needed /var/run/docker.sock mounted — which grants the
+# container effective root on the host and would undo every hardening measure
+# applied to the target. Bundling ffuf + SecLists alongside the Python pipeline
+# removes the need for nested Docker entirely: the fuzz step just runs `bash
+# fuzz.sh` in-process (see src/agentsec/skills/fuzz.py::_ffuf_available).
+#
+# The generated fuzz.sh is unchanged either way — its /SecLists and /results
+# paths are the container contract, and this image satisfies both.
+FROM python:3.12-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ffuf: the fuzzer itself (Debian ships 2.1.0). git: sparse-clone SecLists.
+# bash: fuzz.sh is a bash script. curl: healthcheck / target liveness probes.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ffuf \
+        git \
+        bash \
+        curl \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# SecLists at the path the generated fuzz.sh references. Sparse checkout keeps
+# only the two trees the wordlist selector can choose from.
+RUN git clone --depth 1 --filter=blob:none --sparse \
+        https://github.com/danielmiessler/SecLists.git /SecLists && \
+    cd /SecLists && \
+    git sparse-checkout set Fuzzing Discovery
+
+# Python deps. Deliberately NOT sentence-transformers/torch: embeddings now come
+# from the local Ollama server over HTTP (see src/embedders.py), which drops
+# ~2 GB of wheels AND removes the HuggingFace Hub call and trust_remote_code.
+RUN pip install --no-cache-dir \
+        requests \
+        numpy \
+        pandas \
+        pyarrow \
+        pyyaml \
+        "openai>=1.30"
+
+# Rootless (OWASP Docker Security Cheat Sheet). Overridable so a native-Linux
+# host can match its own uid and stay able to write the bind-mounted results:
+#   DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) docker compose up
+ARG RUNNER_UID=10001
+ARG RUNNER_GID=10001
+RUN groupadd --gid ${RUNNER_GID} runner 2>/dev/null || true && \
+    useradd --uid ${RUNNER_UID} --gid ${RUNNER_GID} --no-create-home \
+            --shell /usr/sbin/nologin runner 2>/dev/null || true
+
+# The repo is bind-mounted here by compose; PROJECT_ROOT resolves to /app
+# because config.py walks up from /app/src/agentsec/config.py.
+WORKDIR /app
+ENV PYTHONPATH=/app/src
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Defence in depth: the default embedding path no longer touches HuggingFace,
+# but if the legacy sentence-transformers backend is ever selected these stop it
+# from reaching the network instead of failing open.
+ENV HF_HUB_OFFLINE=1
+ENV TRANSFORMERS_OFFLINE=1
+
+USER ${RUNNER_UID}:${RUNNER_GID}
+
+# Overridden by docker-compose.yml; this default makes `docker run` useful too.
+CMD ["python", "-m", "agentsec.cli", "scan", "targets/vuln_dashboard.py"]

@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "raguard"
+version = "0.1.0"
+description = "RaGuard — agentic RAG-powered vulnerability analysis & fuzzing pipeline (local Qwen3 orchestrator + specialist SLMs)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE.txt" }
+
+# Runtime deps (mirrors requirements.txt; GPU training deps live on Colab only).
+dependencies = [
+    "requests",
+    "numpy",
+    "pandas",
+    "pyarrow",
+    "pyyaml",
+    "openai>=1.30",
+    "scikit-learn",
+    "flask",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+# Only for loading a legacy Colab-built KB (manifest embed_backend:
+# sentence-transformers). The default Ollama embedder needs neither.
+legacy-kb = ["sentence-transformers", "einops"]
+
+# `agentsec scan targets/test_target2.py` after `pip install -e .`
+[project.scripts]
+agentsec = "agentsec.cli:main"
+
+# src layout: the importable code lives under src/.
+[tool.setuptools]
+package-dir = { "" = "src" }
+# Loose modules the agentsec skills reuse (they sit directly in src/, not in the package).
+py-modules = ["vuln_scanner", "seclist_selector", "generate_fuzz_script", "parse_fuzz_results", "embedders"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["agentsec*"]

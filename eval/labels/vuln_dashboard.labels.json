@@ -1,0 +1,96 @@
+{
+  "target": "targets/vuln_dashboard.py",
+  "description": "Ground-truth labels for the multi-vuln 'internal ops dashboard' target.",
+  "expected_findings": [
+    {
+      "function": "get_user",
+      "cwe_id": "CWE-89",
+      "cwe_name": "SQL Injection",
+      "min_severity": "HIGH",
+      "line_hint": "query = f\"SELECT id, username, role, email FROM users WHERE username = '{username}'\"",
+      "notes": "User-controlled `username` f-stringed into the query executed by /user/<username>."
+    },
+    {
+      "function": "login",
+      "cwe_id": "CWE-89",
+      "cwe_name": "SQL Injection",
+      "min_severity": "CRITICAL",
+      "line_hint": "WHERE username = '{username}' AND password = '{pw_hash}'",
+      "notes": "Authentication bypass: `' OR '1'='1' --` in username short-circuits the credential check. Chain A entry point."
+    },
+    {
+      "function": "login",
+      "cwe_id": "CWE-327",
+      "cwe_name": "Use of a Broken or Risky Cryptographic Algorithm",
+      "min_severity": "MEDIUM",
+      "line_hint": "pw_hash = hashlib.md5(password.encode()).hexdigest()",
+      "notes": "Passwords hashed with unsalted MD5 (also used in init_db seeding)."
+    },
+    {
+      "function": "admin_ping",
+      "cwe_id": "CWE-78",
+      "cwe_name": "OS Command Injection",
+      "min_severity": "CRITICAL",
+      "line_hint": "subprocess.check_output(f\"ping -c 1 {host}\", shell=True, text=True)",
+      "notes": "User `host` passed to a shell; `127.0.0.1; id` executes arbitrary commands. RCE sink for chains A and B."
+    },
+    {
+      "function": "download",
+      "cwe_id": "CWE-22",
+      "cwe_name": "Path Traversal",
+      "min_severity": "HIGH",
+      "line_hint": "full = os.path.join(FILES_DIR, path)",
+      "notes": "No normalisation/containment; `../vuln_dashboard.py` or `../../etc/passwd` escapes FILES_DIR. Chain B leaks ADMIN_TOKEN."
+    },
+    {
+      "function": "search",
+      "cwe_id": "CWE-79",
+      "cwe_name": "Cross-site Scripting (Reflected)",
+      "min_severity": "MEDIUM",
+      "line_hint": "<h1>Search results for: {q}</h1>",
+      "notes": "`q` reflected into an HTML response without escaping."
+    },
+    {
+      "function": "preview",
+      "cwe_id": "CWE-94",
+      "cwe_name": "Server-Side Template Injection",
+      "min_severity": "CRITICAL",
+      "line_hint": "return render_template_string(tpl, ...)",
+      "notes": "User input rendered as a Jinja2 template; `{{ config }}` / `{{ ''.__class__... }}` → RCE. Chain D."
+    },
+    {
+      "function": "load_session",
+      "cwe_id": "CWE-502",
+      "cwe_name": "Deserialization of Untrusted Data",
+      "min_severity": "CRITICAL",
+      "line_hint": "data = pickle.loads(base64.b64decode(token))",
+      "notes": "Untrusted token deserialized with pickle; a crafted payload runs code on load. Chain D."
+    },
+    {
+      "function": "fetch_url",
+      "cwe_id": "CWE-918",
+      "cwe_name": "Server-Side Request Forgery",
+      "min_severity": "HIGH",
+      "line_hint": "resp = requests.get(url, timeout=5)",
+      "notes": "Server fetches an arbitrary user URL; reaches internal services / cloud metadata. Chain C pivot."
+    },
+    {
+      "function": "get_user",
+      "cwe_id": "CWE-798",
+      "cwe_name": "Use of Hard-coded Credentials",
+      "min_severity": "MEDIUM",
+      "line_hint": "ADMIN_TOKEN = \"s3cr3t-admin-token\"",
+      "notes": "Module-level SECRET_KEY / ADMIN_TOKEN hardcoded in source (module scope, not inside a function)."
+    }
+  ],
+  "expected_clean": ["logout"],
+  "expected_dynamic_confirmation": {
+    "CWE-89": true,
+    "CWE-78": true,
+    "CWE-22": false,
+    "CWE-79": false,
+    "CWE-502": false,
+    "CWE-94": false,
+    "CWE-918": false
+  }
+}

@@ -71,15 +71,23 @@ def build_ffuf_cmd(
     cwe_id: str,
     wordlist_rel: str,
     out_tag: str | None = None,
-    match_codes: str = "200",
+    match_codes: str = "all",
     threads: int = 20,
     timeout: int = 10,
     url_encode: bool = True,
+    autocalibrate: bool = True,
 ) -> str:
     """Build a single ffuf command string using container-internal paths.
 
     ``wordlist_rel`` is a SecLists-relative path (e.g.
     ``Fuzzing/Databases/SQLi/Generic-SQLi.txt``) fed as ``/SecLists/<rel>``.
+
+    With ``autocalibrate`` (``-ac``), ffuf first sends throwaway random inputs to
+    learn what a *normal miss* looks like (e.g. an empty result set) and auto-adds
+    size/word/line filters for it. Combined with ``-mc all`` this makes a "hit"
+    mean *the response measurably differed from the baseline* — i.e. an actual
+    injection (a boolean payload returning extra rows, or a broken-SQL 500) —
+    instead of "the endpoint returned 200" (which it does for almost any input).
     """
     safe_cwe = cwe_id.replace("-", "_")
     wordlist = f"/SecLists/{wordlist_rel}"
@@ -95,8 +103,17 @@ def build_ffuf_cmd(
         "-of json",
         f"-t {threads}",
         f"-timeout {timeout}",
-        "-v",
+        # -s (silent), NOT -v. Verbose printed a block per match, and a full run
+        # lands thousands of hits — it buried the pipeline's own progress lines
+        # in `docker compose up` output. The findings are not lost: every match
+        # is still written to the JSON at -o and parsed into fuzz_report.json.
+        # Each job already announces itself via the echo line above it.
+        "-s",
     ]
+    if autocalibrate:
+        # -ac: auto-calibrate baseline filters from random inputs.
+        # -acc: also calibrate per-host so each run learns its own baseline.
+        parts.append("-ac")
     if url_encode:
         parts.append("-enc url")
 
@@ -190,6 +207,8 @@ def generate_fuzz_script(
     use_llm: bool = True,
     model: str = DEFAULT_MODEL,
     catalog_path: Path | None = None,
+    quiet: bool = False,
+    autocalibrate: bool = True,
 ) -> None:
     # ── Load and validate vuln_report.json ────────────────────────────────────
     if not report_path.exists():
@@ -239,8 +258,16 @@ def generate_fuzz_script(
         f"# Mode   : {mode_str}",
         f"# CWEs   : {', '.join(cwe_seen.keys()) or 'none'}",
         "",
-        "set -euo pipefail",
+        # NOT `set -e`. Each ffuf job is INDEPENDENT: a missing wordlist or a
+        # transient error in one must not discard every job after it. Under
+        # `set -e` exactly that happened silently — one bad wordlist aborted the
+        # script and the remaining CWEs were never fuzzed, so the report showed
+        # "no hits" for vulnerabilities that were simply never tested. Failures
+        # are counted and reported in the exit status instead.
+        "set -uo pipefail",
         "mkdir -p /results",
+        "",
+        "fuzz_failed=0",
         "",
     ]
 
@@ -265,6 +292,23 @@ def generate_fuzz_script(
             wordlist_rels = CWE_WORDLIST_MAP.get(cwe_id, CWE_WORDLIST_MAP["_default"])[:max_wordlists]
             source = "static-map"
 
+        # The README promises LLM-returned paths are validated against the
+        # catalog so the model cannot invent one — but the STATIC FALLBACK map
+        # was never held to that, and shipped four paths that do not exist in
+        # SecLists (e.g. Fuzzing/SSRF/SSRF-targets.txt). Validate both sources.
+        if catalog:
+            checked = []
+            for wl_rel in wordlist_rels:
+                if wl_rel in catalog:
+                    checked.append(wl_rel)
+                else:
+                    print(f"  [{cwe_id}] SKIP {wl_rel} — not in the SecLists catalog")
+            if not checked:
+                checked = [w for w in CWE_WORDLIST_MAP["_default"] if w in catalog][:1]
+                if checked:
+                    print(f"  [{cwe_id}] falling back to {checked[0]}")
+            wordlist_rels = checked
+
         for wl_rel in wordlist_rels:
             cmd = build_ffuf_cmd(
                 target_url=target_url,
@@ -272,14 +316,33 @@ def generate_fuzz_script(
                 wordlist_rel=wl_rel,
                 match_codes=match_codes,
                 url_encode=url_encode,
+                autocalibrate=autocalibrate,
             )
-            script_lines.append(cmd)
+            # Keep going on failure, but record it so the run cannot look clean
+            # when jobs were skipped.
+            script_lines.append(cmd + " || {")
+            script_lines.append(
+                f"  echo \"[fuzz] WARN: {cwe_id} job failed (wordlist: {wl_rel})\" >&2"
+            )
+            script_lines.append("  fuzz_failed=$((fuzz_failed+1))")
+            script_lines.append("}")
             jobs_written += 1
             print(f"  [{cwe_id}] {wl_rel} ({source})")
 
         script_lines.append("")
 
     script_lines.append("echo '[fuzz] Done. Results written to /results/'")
+    script_lines.append('if [ "$fuzz_failed" -gt 0 ]; then')
+    script_lines.append(
+        '  echo "[fuzz] $fuzz_failed of '
+        + str(jobs_written)
+        + ' job(s) FAILED — those CWEs were not tested." >&2'
+    )
+    script_lines.append("fi")
+    # Exit 0 even with failed jobs: the successful ones produced real results
+    # worth parsing. run_fuzz surfaces the failure count instead of discarding
+    # the whole run.
+    script_lines.append("exit 0")
 
     # ── Write and chmod the script ────────────────────────────────────────────
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -289,16 +352,21 @@ def generate_fuzz_script(
     print(f"\n[generate] Script written to : {output_path.resolve()}")
     print(f"[generate] Jobs              : {jobs_written}")
     print(f"[generate] Unique CWEs       : {len(cwe_seen)}")
-    print()
-    print("Next steps:")
-    print("  1. docker build -t vuln-fuzzer .")
-    print("  2. mkdir -p results/fuzz")
-    print("  3. docker run --rm \\")
-    print("       -v $(pwd)/results/scripts/fuzz.sh:/fuzz/fuzz.sh \\")
-    print("       -v $(pwd)/results/fuzz:/results \\")
-    print("       --add-host=host.docker.internal:host-gateway \\")
-    print("       vuln-fuzzer bash /fuzz/fuzz.sh")
-    print("  4. python src/parse_fuzz_results.py")
+    # The manual "Next steps" block only makes sense for standalone step-by-step
+    # use. When called from the agentic/sequential pipeline (quiet=True) the
+    # runner executes and parses on its own, so printing manual docker commands
+    # would be misleading.
+    if not quiet:
+        print()
+        print("Next steps:")
+        print("  1. docker build -t vuln-fuzzer .")
+        print("  2. mkdir -p results/fuzz")
+        print("  3. docker run --rm \\")
+        print("       -v $(pwd)/results/scripts/fuzz.sh:/fuzz/fuzz.sh \\")
+        print("       -v $(pwd)/results/fuzz:/results \\")
+        print("       --add-host=host.docker.internal:host-gateway \\")
+        print("       vuln-fuzzer bash /fuzz/fuzz.sh")
+        print("  4. python src/parse_fuzz_results.py")
 
 
 def parse_args():

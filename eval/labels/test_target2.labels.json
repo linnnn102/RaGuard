@@ -1,0 +1,18 @@
+{
+  "target": "targets/test_target2.py",
+  "description": "Ground-truth vulnerability labels for the SQLi lab target.",
+  "expected_findings": [
+    {
+      "function": "get_user",
+      "cwe_id": "CWE-89",
+      "cwe_name": "SQL Injection",
+      "min_severity": "HIGH",
+      "line_hint": "query = f\"SELECT * FROM users WHERE username = '{username}'\"",
+      "notes": "User-controlled `username` f-string-concatenated into the SQL query; the /user/<username> route executes it directly."
+    }
+  ],
+  "expected_clean": ["init_db"],
+  "expected_dynamic_confirmation": {
+    "CWE-89": true
+  }
+}

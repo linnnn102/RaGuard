@@ -1,0 +1,66 @@
+"""registry.py — task → logged model client, and the orchestrator client.
+
+The registry is the only place backends are constructed. It reads the S4 config,
+builds the right backend for each task route, wraps every client in
+``LoggingModelClient`` (S1), and caches them. Task code asks for
+``registry.for_task("analyze_code")`` and gets a client that is already routed
+*and* logged — swapping a specialist for a fine-tuned adapter tag is a one-line
+config edit with no code change.
+"""
+
+from __future__ import annotations
+
+from typing import Optional
+
+from ..config import Config, TaskRoute, load_config
+from .base import ModelClient
+from .call_log import CallLogSink, LoggingModelClient
+from .ollama_backend import OllamaBackend
+from .openai_backend import OpenAIBackend
+
+
+class ModelRegistry:
+    def __init__(self, config: Optional[Config] = None):
+        self.config = config or load_config()
+        self._sink: Optional[CallLogSink] = None
+        if self.config.logging.enabled:
+            self._sink = CallLogSink(self.config.logging.dir)
+        self._cache: dict[str, LoggingModelClient] = {}
+
+    # ── backend construction ────────────────────────────────────────────────
+    def _build_backend(self, backend: str, model: str) -> ModelClient:
+        if backend == "ollama":
+            opts = self.config.backend_opts("ollama")
+            return OllamaBackend(model=model, **opts)
+        if backend == "openai":
+            o = self.config.orchestrator
+            return OpenAIBackend(
+                model=model,
+                base_url=o.base_url,
+                api_key=o.api_key,
+                temperature=o.temperature,
+            )
+        raise ValueError(f"Unknown backend '{backend}'")
+
+    def _wrap(self, inner: ModelClient, task: str) -> LoggingModelClient:
+        return LoggingModelClient(
+            inner=inner,
+            task=task,
+            sink=self._sink,
+            enabled=self.config.logging.enabled,
+        )
+
+    # ── public accessors ────────────────────────────────────────────────────
+    def for_task(self, task: str) -> LoggingModelClient:
+        if task not in self._cache:
+            route: TaskRoute = self.config.task(task)
+            inner = self._build_backend(route.backend, route.model)
+            self._cache[task] = self._wrap(inner, task)
+        return self._cache[task]
+
+    def orchestrator(self) -> LoggingModelClient:
+        if "orchestrator" not in self._cache:
+            o = self.config.orchestrator
+            inner = self._build_backend(o.backend, o.model)
+            self._cache["orchestrator"] = self._wrap(inner, "orchestrator")
+        return self._cache["orchestrator"]

@@ -1,0 +1,212 @@
+<title>RaGuard — System Architecture</title>
+<style>
+  :root {
+    --paper:#f5f6f9; --surface:#ffffff; --ink:#191d27; --muted:#586074;
+    --line:#e3e6ed; --line-strong:#d3d8e2;
+    --indigo:#3f52c4; --amber:#b16a26;
+    --plate:#10151f; --plate-line:#232c3c;
+    --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --maxw: 1000px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:#0e121a; --surface:#161b25; --ink:#e8ebf2; --muted:#98a1b3;
+      --line:#242b39; --line-strong:#313a4c;
+      --indigo:#8291ff; --amber:#e5a25a;
+    }
+  }
+  :root[data-theme="light"] {
+    --paper:#f5f6f9; --surface:#ffffff; --ink:#191d27; --muted:#586074;
+    --line:#e3e6ed; --line-strong:#d3d8e2; --indigo:#3f52c4; --amber:#b16a26;
+  }
+  :root[data-theme="dark"] {
+    --paper:#0e121a; --surface:#161b25; --ink:#e8ebf2; --muted:#98a1b3;
+    --line:#242b39; --line-strong:#313a4c; --indigo:#8291ff; --amber:#e5a25a;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:var(--font-sans); line-height:1.65;
+    -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  }
+  .wrap { max-width:var(--maxw); margin:0 auto; padding:clamp(1.5rem,4vw,3.5rem) clamp(1.1rem,4vw,2rem) 4rem; }
+
+  .eyebrow {
+    font-family:var(--font-mono); font-size:.72rem; letter-spacing:.16em;
+    text-transform:uppercase; color:var(--indigo); margin:0 0 .9rem;
+  }
+  header h1 {
+    font-size:clamp(1.95rem,4.4vw,2.9rem); line-height:1.08; font-weight:640;
+    letter-spacing:-.022em; text-wrap:balance; margin:0 0 .7rem;
+  }
+  header .lede {
+    font-size:clamp(1.02rem,1.6vw,1.18rem); color:var(--muted);
+    max-width:64ch; margin:0;
+  }
+  header .lede strong { color:var(--ink); font-weight:600; }
+
+  .rule { height:1px; background:var(--line); border:0; margin:clamp(2rem,5vw,3.2rem) 0; }
+
+  figure { margin:0 0 clamp(2.4rem,6vw,3.6rem); }
+  .fig-head { display:flex; align-items:baseline; gap:.85rem; flex-wrap:wrap; margin-bottom:.5rem; }
+  .fig-num {
+    font-family:var(--font-mono); font-size:.78rem; font-weight:600;
+    letter-spacing:.08em; color:var(--amber);
+    border:1px solid var(--line-strong); border-radius:5px; padding:.1rem .5rem;
+  }
+  figure h2 { font-size:clamp(1.2rem,2.1vw,1.5rem); font-weight:620; letter-spacing:-.012em; margin:0; }
+  .fig-desc { color:var(--muted); margin:.35rem 0 1.15rem; max-width:70ch; }
+  .fig-desc code {
+    font-family:var(--font-mono); font-size:.86em; color:var(--ink);
+    background:color-mix(in srgb, var(--indigo) 12%, transparent);
+    padding:.05em .38em; border-radius:4px;
+  }
+
+  .plate {
+    background:var(--plate);
+    background-image:radial-gradient(circle at 1px 1px, rgba(255,255,255,.045) 1px, transparent 0);
+    background-size:22px 22px;
+    border:1px solid var(--plate-line); border-radius:12px;
+    padding:clamp(1rem,3vw,1.9rem); overflow-x:auto;
+    box-shadow:0 1px 2px rgba(0,0,0,.16), 0 10px 30px -18px rgba(0,0,0,.5);
+  }
+  .plate .mermaid { display:flex; justify-content:center; min-width:min-content; }
+  .plate .mermaid svg { max-width:100%; height:auto; }
+
+  figcaption {
+    margin-top:.95rem; font-size:.9rem; color:var(--muted);
+    display:flex; gap:.55rem; align-items:flex-start;
+  }
+  figcaption .tag {
+    flex:none; font-family:var(--font-mono); font-size:.7rem; letter-spacing:.06em;
+    text-transform:uppercase; color:var(--amber);
+    border:1px solid color-mix(in srgb, var(--amber) 45%, var(--line-strong));
+    border-radius:4px; padding:.12rem .45rem; margin-top:.08rem;
+  }
+  figcaption code { font-family:var(--font-mono); font-size:.85em; color:var(--ink); }
+
+  footer {
+    margin-top:1rem; padding-top:1.6rem; border-top:1px solid var(--line);
+    font-size:.9rem; color:var(--muted);
+  }
+  footer p { margin:.3rem 0; }
+  footer a { color:var(--indigo); text-decoration:none; border-bottom:1px solid color-mix(in srgb, var(--indigo) 35%, transparent); }
+  footer a:focus-visible, .plate:focus-visible { outline:2px solid var(--indigo); outline-offset:3px; }
+
+  @media (prefers-reduced-motion:no-preference) {
+    figure, header { animation:rise .5s cubic-bezier(.2,.6,.2,1) both; }
+    figure:nth-of-type(2) { animation-delay:.06s; }
+    figure:nth-of-type(3) { animation-delay:.12s; }
+    @keyframes rise { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">RaGuard · System Architecture</p>
+    <h1>A heterogeneous agentic pipeline that finds, <em>confirms</em>, and fixes web vulnerabilities.</h1>
+    <p class="lede">A generalist orchestrator routes narrow <strong>specialist SLMs</strong>, grounds its analysis in a <strong>RAG</strong> knowledge base of CWE/CVE, and closes the loop by <strong>dynamically confirming</strong> each static finding with a fuzzer — running fully locally, against a target sealed in a container.</p>
+  </header>
+
+  <hr class="rule" />
+
+  <figure>
+    <div class="fig-head">
+      <span class="fig-num">View 01</span>
+      <h2>The agentic pipeline</h2>
+    </div>
+    <p class="fig-desc">Source → analyze (RAG-grounded) → fuzz to <em>confirm</em> → mitigate → report. The order is fixed in deterministic mode; in <code>--agentic</code> mode the orchestrator chooses it via a tool-calling loop.</p>
+    <div class="plate" tabindex="0" aria-label="Agentic pipeline diagram">
+      <pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize':'13px','primaryColor':'#1b2233','primaryBorderColor':'#3f4a63','primaryTextColor':'#e7ebf3','lineColor':'#6c7488','clusterBkg':'#0d1220','clusterBorder':'#2a3446','edgeLabelBackground':'#10151f','titleColor':'#cdd8ff'}}}%%
+flowchart LR
+    SRC["Target source · vuln_dashboard.py"] --> ORCH
+    ORCH{{"Orchestrator — generalist LLM · Qwen3 / Ollama"}}
+    subgraph TOOLS["specialist tools the orchestrator routes"]
+      direction TB
+      A["analyze_code · SLM"]
+      F["run_fuzz · ffuf + SecLists (Docker)"]
+      MIT["suggest_mitigations · SLM"]
+    end
+    RAG[("RAG KB — CWE + CVE · cosine top-k")]
+    ORCH -- "1 analyze" --> A
+    RAG -. "retrieved context" .-> A
+    A -- "findings" --> ORCH
+    ORCH -- "2 fuzz" --> F
+    F -- "confirmed hits" --> ORCH
+    ORCH -- "3 mitigate" --> MIT
+    MIT -- "fixes" --> ORCH
+    ORCH --> REP["full_report.json — findings · confirmed · mitigations"]
+    classDef store fill:#141a28,stroke:#49556f,color:#c2cadb;
+    classDef output fill:#161f3d,stroke:#7c8dff,color:#cdd8ff,stroke-width:1.5px;
+    class RAG store;
+    class REP output;
+      </pre>
+    </div>
+    <figcaption><span class="tag">closed loop</span><span>A finding is only marked <code>confirmed</code> once the fuzzer reproduces it — this is what separates RaGuard from a static-only scanner.</span></figcaption>
+  </figure>
+
+  <figure>
+    <div class="fig-head">
+      <span class="fig-num">View 02</span>
+      <h2>Runtime isolation topology</h2>
+    </div>
+    <p class="fig-desc"><code>docker compose up</code> is the only command. The <strong>runner</strong> container holds the orchestrator, the specialists <em>and</em> ffuf + SecLists; the <strong>target</strong> container holds the intentionally-vulnerable app. They talk over the compose network by service name, so no port hairpins through the host and the target publishes only to <code>127.0.0.1</code>. Bundling the fuzzer into the runner avoids mounting the Docker socket, which would grant the container effective root on the host. Only Ollama stays on the host, because it needs the GPU.</p>
+    <div class="plate" tabindex="0" aria-label="Runtime isolation topology diagram">
+      <pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize':'13px','primaryColor':'#1b2233','primaryBorderColor':'#3f4a63','primaryTextColor':'#e7ebf3','lineColor':'#6c7488','clusterBkg':'#0d1220','clusterBorder':'#2a3446','edgeLabelBackground':'#10151f','titleColor':'#cdd8ff'}}}%%
+flowchart LR
+    subgraph HOST["host — only Ollama"]
+      OLL[("Ollama · Qwen3 + qwen3-embedding:0.6b")]
+    end
+    subgraph NET["docker compose network"]
+      subgraph C1["raguard-runner"]
+        CLI["agentsec CLI · orchestrator + specialists"]
+        FFUF["ffuf + SecLists · in-process"]
+        CLI --- FFUF
+      end
+      subgraph C2["raguard-target — SANDBOX"]
+        APP["Flask target · 0.0.0.0:5055"]
+      end
+      FFUF -- "http://target:5055" --> APP
+    end
+    CLI -- "host.docker.internal:11434" --> OLL
+    classDef sandbox fill:#2a2016,stroke:#e0913a,color:#f3d7ac,stroke-width:1.5px;
+    classDef store fill:#141a28,stroke:#49556f,color:#c2cadb;
+    class APP sandbox;
+    class OLL store;
+      </pre>
+    </div>
+    <figcaption><span class="tag">containment</span><span>OWASP Docker Security Cheat Sheet posture on the target: rootless (<code>uid 10001</code>), <code>privileged: false</code>, <code>cap_drop: ALL</code> (zero effective caps — ping uses unprivileged ICMP sockets via the <code>ping_group_range</code> sysctl), <code>no-new-privileges</code>, <strong>read-only rootfs</strong> with writable state confined to <code>noexec</code> tmpfs at <code>/data</code> and <code>/tmp</code>, plus <code>cpus</code>/<code>mem</code>/<code>pids</code>/<code>ulimits</code> ceilings. An exploit still <em>lands</em> (so the fuzzer confirms it) but as an unprivileged user on an immutable filesystem — see <code>docker-compose.yml</code>.</span></figcaption>
+  </figure>
+
+  <figure>
+    <div class="fig-head">
+      <span class="fig-num">View 03</span>
+      <h2>The S1–S6 LLM→SLM conversion flywheel</h2>
+    </div>
+    <p class="fig-desc">The thesis methodology: turn expensive generalist calls into cheap fine-tuned specialists, and measure the payoff. <code>S4</code> is the pivot — one versioned router makes swapping a model a one-line change.</p>
+    <div class="plate" tabindex="0" aria-label="S1 to S6 conversion flywheel diagram">
+      <pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize':'13px','primaryColor':'#1b2233','primaryBorderColor':'#3f4a63','primaryTextColor':'#e7ebf3','lineColor':'#6c7488','edgeLabelBackground':'#10151f'}}}%%
+flowchart LR
+    S1["S1 · log calls"] --> S2["S2 · curate"]
+    S2 --> S3["S3 · cluster tasks"]
+    S3 --> S5["S5 · export → LoRA (Colab) → register adapter"]
+    S5 --> S4["S4 · config router · agentsec.yaml"]
+    S4 --> S6["S6 · iterate + eval · latency · tokens · price · F1"]
+    S6 -. "swap OTS SLM → tuned adapter" .-> S1
+    classDef pivot fill:#161f3d,stroke:#7c8dff,color:#cdd8ff,stroke-width:1.5px;
+    class S4 pivot;
+      </pre>
+    </div>
+    <figcaption><span class="tag">arXiv:2506.02153</span><span>NVIDIA, <em>Small Language Models are the Future of Agentic AI</em> — the mechanism that produces the tuned arm measured in the eval.</span></figcaption>
+  </figure>
+
+  <footer>
+    <p><strong>Using these for the defense:</strong> open full-screen on the projector, or screenshot each plate straight into a slide — the dark plates hold up on both projector and print.</p>
+    <p>Diagram source lives in <code>docs/architecture.md</code>; the demo walk-through is in <code>docs/demo_runbook.md</code>.</p>
+  </footer>
+</div>
