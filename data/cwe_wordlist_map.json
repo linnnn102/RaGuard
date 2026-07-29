@@ -1,42 +1,42 @@
 {
-    "_comment": "FALLBACK CWE → SecLists wordlist map. Used only when the LLM selector (src/seclist_selector.py) is disabled (--no-use-llm) or unreachable. Paths are relative to the SecLists root (/SecLists inside Docker). Primary wordlist selection is now done by the language model against data/seclists_catalog.txt.",
-    "CWE-89": [
-        "Fuzzing/Databases/SQLi/MySQL-SQLi-Login-Bypass.fuzzdb.txt",
-        "Fuzzing/Databases/SQLi/Generic-SQLi.txt"
-    ],
-    "CWE-79": [
-        "Fuzzing/XSS/human-friendly/XSS-Jhaddix.txt",
-        "Fuzzing/XSS/robot-friendly/XSS-Jhaddix.txt",
-        "Fuzzing/XSS/human-friendly/XSS-BruteLogic.txt",
-        "Fuzzing/XSS/robot-friendly/XSS-BruteLogic.txt"
-    ],
-    "CWE-78": [
-        "Fuzzing/command-injection-commix.txt"
-    ],
-    "CWE-22": [
-        "Fuzzing/LFI/Linux/LFI-gracefulsecurity-linux.txt",
-        "Fuzzing/LFI/LFI-LFISuite-pathtotest-huge.txt"
-    ],
-    "CWE-287": [
-        "Fuzzing/Authentication/Authentication.txt"
-    ],
-    "CWE-352": [
-        "Fuzzing/CSRF/CSRF-token-wordlist.txt"
-    ],
-    "CWE-434": [
-        "Fuzzing/Extensions.fuzz.txt"
-    ],
-    "CWE-502": [
-        "Fuzzing/XSS/Polyglots/XSS-Polyglots.txt"
-    ],
-    "CWE-918": [
-        "Fuzzing/SSRF/SSRF-targets.txt"
-    ],
-    "CWE-20": [
-        "Fuzzing/XSS/Polyglots/XSS-Polyglots.txt",
-        "Fuzzing/special-chars.txt"
-    ],
-    "_default": [
-        "Discovery/Web-Content/common.txt"
-    ]
+  "_comment": "FALLBACK CWE \u2192 SecLists wordlist map. Used only when the LLM selector (src/seclist_selector.py) is disabled (--no-use-llm) or unreachable. Paths are relative to the SecLists root (/SecLists inside Docker). Primary wordlist selection is now done by the language model against data/seclists_catalog.txt.",
+  "CWE-89": [
+    "Fuzzing/Databases/SQLi/MySQL-SQLi-Login-Bypass.fuzzdb.txt",
+    "Fuzzing/Databases/SQLi/Generic-SQLi.txt"
+  ],
+  "CWE-79": [
+    "Fuzzing/XSS/human-friendly/XSS-Jhaddix.txt",
+    "Fuzzing/XSS/robot-friendly/XSS-Jhaddix.txt",
+    "Fuzzing/XSS/human-friendly/XSS-BruteLogic.txt",
+    "Fuzzing/XSS/robot-friendly/XSS-BruteLogic.txt"
+  ],
+  "CWE-78": [
+    "Fuzzing/command-injection-commix.txt"
+  ],
+  "CWE-22": [
+    "Fuzzing/LFI/Linux/LFI-gracefulsecurity-linux.txt",
+    "Fuzzing/LFI/LFI-LFISuite-pathtotest-huge.txt"
+  ],
+  "CWE-287": [
+    "Fuzzing/Databases/SQLi/sqli.auth.bypass.txt"
+  ],
+  "CWE-352": [
+    "Discovery/Web-Content/common.txt"
+  ],
+  "CWE-434": [
+    "Discovery/Web-Content/raft-medium-extensions.txt"
+  ],
+  "CWE-502": [
+    "Fuzzing/XSS/Polyglots/XSS-Polyglots.txt"
+  ],
+  "CWE-918": [
+    "Discovery/Web-Content/common.txt"
+  ],
+  "CWE-20": [
+    "Fuzzing/XSS/Polyglots/XSS-Polyglots.txt",
+    "Fuzzing/special-chars.txt"
+  ],
+  "_default": [
+    "Discovery/Web-Content/common.txt"
+  ]
 }

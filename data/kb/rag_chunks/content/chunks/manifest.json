@@ -1,6 +1,6 @@
 {
-  "embed_model": "nomic-ai/nomic-embed-text-v2-moe",
-  "embed_dim": 768,
+  "embed_model": "qwen3-embedding:0.6b",
+  "embed_dim": 1024,
   "semantic_threshold": 0.82,
   "cwe_chunks": 969,
   "cve_chunks": 25,
@@ -30,5 +30,7 @@
     "CWE-89",
     "CWE-918",
     "CWE-94"
-  ]
+  ],
+  "embed_backend": "ollama",
+  "query_instruction": "Given a code vulnerability description, retrieve the CWE weakness definitions and CVE examples most relevant to it"
 }

@@ -1,0 +1,55 @@
+# agentsec router — OPTIONAL: GLM5 cloud orchestrator
+# ===================================================
+# Same heterogeneous design as the default config, but the generalist
+# orchestrator is the GLM5 cloud model (OpenAI-compatible) instead of a local
+# Qwen3. Use this when you have GLM API access and want a stronger orchestrator
+# than local hardware can serve. The specialists stay local (Ollama).
+#
+# Run with:
+#   export GLM_API_KEY=...
+#   AGENTSEC_CONFIG=config/agentsec.glm.yaml python -m agentsec.cli scan targets/test_target2.py
+#
+# ${VAR} and ${VAR:-default} are expanded from the environment at load time so
+# URLs / API keys never live in the repo.
+
+version: glm
+
+logging:
+  enabled: true
+  dir: logs/calls          # S1 — append-only JSONL, one file per task
+
+# Generalist orchestrator: GLM5 over an OpenAI-compatible endpoint.
+orchestrator:
+  backend: openai          # OpenAI-compatible endpoint (GLM5)
+  model: ${GLM_MODEL:-glm-4.5}
+  base_url: ${GLM_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}
+  api_key: ${GLM_API_KEY:-}
+  temperature: 0.2
+  max_steps: 12
+
+# Shared backend endpoints.
+backends:
+  ollama:
+    base_url: ${OLLAMA_URL:-http://localhost:11434}
+
+# Specialist SLMs — one route per narrow task (local, unchanged).
+tasks:
+  analyze_code:
+    backend: ollama
+    model: ${ANALYZE_MODEL:-qwen3}
+  select_wordlists:
+    backend: ollama
+    model: ${WORDLIST_MODEL:-qwen3}
+  suggest_mitigations:
+    backend: ollama
+    model: ${MITIGATE_MODEL:-qwen3}
+
+rag:
+  chunks_zip: data/kb/rag_chunks.zip
+  top_k: 6
+
+fuzz:
+  target_url: ${FUZZ_TARGET_URL:-http://host.docker.internal:5055/user/FUZZ}
+  match_codes: "200"
+  max_wordlists: 2
+  catalog: data/seclists_catalog.txt

@@ -1,0 +1,38 @@
+# RaGuard — agentic LLM + specialist SLM security pipeline
+# Runtime + repo-side data tooling. GPU training deps (S5) live on Colab only.
+
+# core
+requests
+numpy
+pandas
+pyarrow
+pyyaml
+
+# RAG retrieval — embeddings come from the local Ollama server over HTTP
+# (src/embedders.py), so no torch / sentence-transformers on the default path.
+# That removes ~2 GB of wheels, the HuggingFace Hub call at startup, and the
+# trust_remote_code=True that downloaded and executed model code from the Hub.
+#
+# Only needed to LOAD a legacy Colab-built knowledge base whose manifest says
+# embed_backend: sentence-transformers. Install with: pip install -e ".[legacy-kb]"
+# sentence-transformers
+# einops
+
+# orchestrator (GLM5, OpenAI-compatible tool calling)
+openai>=1.30
+
+# S2/S3 data curation + clustering
+scikit-learn
+
+# target app / eval fixtures
+flask
+
+# tests
+pytest
+
+# --- Colab only (NOT installed here); listed for reference ---
+# peft
+# transformers
+# trl
+# bitsandbytes
+# accelerate

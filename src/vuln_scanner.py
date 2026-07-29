@@ -35,7 +35,7 @@ from typing import Optional
 import requests
 import numpy as np
 import pandas as pd
-from sentence_transformers import SentenceTransformer
+from embedders import make_embedder  # local Ollama by default; HF path is lazy
 
 # ── Terminal colours ───────────────────────────────────────────────────────────
 class C:
@@ -71,7 +71,13 @@ SEVERITY_RANK = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "INFO": 0}
 class KnowledgeBase:
     """Loads CWE/CVE chunks and embeddings from the Colab zip output."""
 
-    def __init__(self, source: Path, embed_model: str = "nomic-ai/nomic-embed-text-v2-moe"):
+    def __init__(
+        self,
+        source: Path,
+        embed_model: str | None = None,
+        embed_backend: str | None = None,
+        ollama_url: str = "http://localhost:11434",
+    ):
         self.chunks_dir = self._resolve_dir(source)
         print(col(f"[KB] Loading knowledge base from {self.chunks_dir} ...", C.CYAN))
 
@@ -80,14 +86,34 @@ class KnowledgeBase:
         self.emb_cwe = np.load(self.chunks_dir / "cwe_embeddings.npy")
         self.emb_cve = np.load(self.chunks_dir / "cve_embeddings.npy")
 
+        # The manifest is authoritative: query vectors MUST come from the same
+        # model that produced the stored document vectors, or cosine similarity
+        # compares two unrelated vector spaces and retrieval silently degrades
+        # to noise. Explicit args override only for deliberate experiments.
         manifest_path = self.chunks_dir / "manifest.json"
+        self.manifest = {}
         if manifest_path.exists():
             self.manifest = json.loads(manifest_path.read_text())
-            embed_model = self.manifest.get("embed_model", embed_model)
+            embed_model = embed_model or self.manifest.get("embed_model")
+            embed_backend = embed_backend or self.manifest.get("embed_backend")
 
         print(col(f"[KB] CWE chunks: {len(self.df_cwe)} | CVE chunks: {len(self.df_cve)}", C.CYAN))
-        print(col(f"[KB] Loading embedding model: {embed_model} ...", C.CYAN))
-        self.embedder = SentenceTransformer(embed_model, trust_remote_code=True)
+        print(col(f"[KB] Embedder: {embed_model} (backend={embed_backend or 'ollama'})", C.CYAN))
+        self.embedder = make_embedder(
+            backend=embed_backend, model=embed_model, base_url=ollama_url
+        )
+
+        # Catch a dimension mismatch here rather than as meaningless scores far
+        # downstream (e.g. a KB re-embedded at 4096-d read by a 768-d model).
+        stored_dim = self.emb_cwe.shape[1]
+        probe_dim = int(self.embedder.encode("dimension probe", is_query=True).shape[0])
+        if probe_dim != stored_dim:
+            raise ValueError(
+                f"Embedding dimension mismatch: stored KB vectors are {stored_dim}-d "
+                f"but {embed_model!r} produces {probe_dim}-d. The KB must be "
+                f"re-embedded with this model — run:\n"
+                f"    python scripts/reembed_kb.py"
+            )
         print(col("[KB] Ready.", C.GREEN))
 
     def _resolve_dir(self, source: Path) -> Path:
@@ -109,10 +135,9 @@ class KnowledgeBase:
         return source
 
     def embed_query(self, text: str) -> np.ndarray:
-        return self.embedder.encode(
-            f"search_query: {text}",
-            normalize_embeddings=True,
-        )
+        # is_query=True applies the backend's query-side template (Qwen3's
+        # "Instruct:" preamble, or nomic's "search_query: " prefix).
+        return self.embedder.encode(text, is_query=True, normalize_embeddings=True)
 
     def retrieve(
         self,

@@ -1,0 +1,6 @@
+# Keep the target build context clean so init_db() seeds a fresh database and
+# no host caches leak into the image.
+__pycache__/
+*.py[cod]
+*.db
+.DS_Store

@@ -22,8 +22,15 @@ import json
 from pathlib import Path
 
 
-def parse_ffuf_file(path: Path, match_codes: set[int]) -> dict:
-    """Parse a single ffuf JSON output file and return a job summary."""
+def parse_ffuf_file(path: Path, match_codes: set[int] | None) -> dict:
+    """Parse a single ffuf JSON output file and return a job summary.
+
+    ``match_codes=None`` counts *every* result ffuf recorded. Use this with
+    autocalibrated runs (``-ac``): ffuf has already filtered out the baseline
+    "normal miss" responses, so whatever remains is an anomaly — a payload that
+    measurably changed the response (extra rows returned, or a broken-SQL error).
+    Passing a concrete set (e.g. ``{200}``) keeps the old status-only filtering.
+    """
     try:
         data = json.loads(path.read_text())
     except (json.JSONDecodeError, OSError) as e:
@@ -32,14 +39,21 @@ def parse_ffuf_file(path: Path, match_codes: set[int]) -> dict:
     hits = []
     for result in data.get("results", []):
         status = result.get("status")
-        if status in match_codes:
-            hits.append({
-                "url":    result.get("url"),
-                "status": status,
-                "length": result.get("length"),
-                "words":  result.get("words"),
-                "input":  result.get("input", {}).get("FUZZ", ""),
-            })
+        if match_codes is not None and status not in match_codes:
+            continue
+        length = result.get("length")
+        words = result.get("words")
+        hits.append({
+            "url":    result.get("url"),
+            "status": status,
+            "length": length,
+            "words":  words,
+            "input":  result.get("input", {}).get("FUZZ", ""),
+            # Why ffuf flagged it: an HTTP error, or an anomalous response size
+            # that survived baseline auto-calibration.
+            "reason": ("http-error" if isinstance(status, int) and status >= 500
+                       else f"anomalous-size (len={length}, words={words})"),
+        })
 
     # Recover CWE ID from filename: ffuf_CWE_89_wordlistname.json
     stem  = path.stem
@@ -61,7 +75,7 @@ def parse_ffuf_file(path: Path, match_codes: set[int]) -> dict:
 def parse_fuzz_results(
     results_dir: Path,
     output_path: Path,
-    match_codes: set[int],
+    match_codes: set[int] | None,
 ) -> dict:
     result_files = sorted(results_dir.glob("ffuf_*.json"))
 
@@ -107,18 +121,20 @@ def parse_args():
         help="Output path for the hits report (default: ./results/reports/fuzz_report.json)",
     )
     p.add_argument(
-        "--match-codes", default="200",
-        help="Comma-separated HTTP status codes to count as hits (default: 200)",
+        "--match-codes", default="all",
+        help="Comma-separated HTTP status codes to count as hits, or 'all' to "
+             "count every result ffuf recorded (correct for -ac runs). Default: all",
     )
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args        = parse_args()
-    match_codes = {int(c.strip()) for c in args.match_codes.split(",")}
+    match_codes = (None if args.match_codes.strip().lower() == "all"
+                   else {int(c.strip()) for c in args.match_codes.split(",")})
 
     print(f"[parse] Results dir : {args.results_dir}")
-    print(f"[parse] Match codes : {match_codes}")
+    print(f"[parse] Match codes : {match_codes if match_codes is not None else 'all (calibrated anomalies)'}")
     print(f"[parse] Output      : {args.output}\n")
 
     if not args.results_dir.exists():
