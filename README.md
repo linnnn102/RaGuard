@@ -239,7 +239,7 @@ Regenerate the catalog any time with `python tools/build_seclists_catalog.py`.
 
 **Step 4: Build the standalone fuzzer image (once)**
 ```bash
-docker compose --profile tools build fuzzer   # or: docker build -t vuln-fuzzer .
+docker build -t vuln-fuzzer .
 ```
 Only needed for host-side runs. Under `docker compose up` the runner already
 contains ffuf + SecLists and executes `fuzz.sh` in-process.

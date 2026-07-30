@@ -94,8 +94,20 @@ ICMP sockets, enabled by the `ping_group_range` sysctl, so `NET_RAW` is no
 longer granted); `no-new-privileges`; a **read-only root filesystem** with
 writable state confined to two `noexec,nosuid` tmpfs mounts (`/data` for the
 SQLite DB, `/tmp`); and `cpus` / `mem_limit` / `pids_limit` / `ulimits` ceilings
-so a landed payload cannot DoS the host. An optional internal network cuts
-egress. See `docker-compose.yml`.
+so a landed payload cannot DoS the host.
+
+To also cut the target's **outbound** access — blocking reverse shells and data
+exfiltration, at the cost of the `/fetch` SSRF demo to the public internet —
+attach it to an internal network:
+
+```yaml
+services:
+  target:
+    networks: [sandbox]
+networks:
+  sandbox:
+    internal: true
+```
 
 The design intent is that an exploit **lands** — so the fuzzer can confirm it —
 but lands as an unprivileged user on an immutable filesystem with no
