@@ -3,7 +3,7 @@
 Three views for the defense: the **agentic pipeline** (what the system does), the
 **runtime isolation topology** (how it stays safe), and the **S1–S6 conversion
 flywheel** (the thesis methodology). All three render on GitHub; screenshot them
-into slides, or open the presentation-ready page in `docs/architecture.html`.
+straight into slides.
 
 ---
 
