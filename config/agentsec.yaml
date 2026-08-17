@@ -42,21 +42,29 @@ backends:
 
 # Specialist SLMs — one route per narrow task. Point `model` at a fine-tuned
 # adapter tag (e.g. qwen3-analyze-v2) after S5 with zero code change.
+#
+# `format` (Move 1) is Ollama structured output: "json" constrains the reply to
+# valid JSON, so the model can't ramble past its token budget without closing
+# the array/object. This is the enabler that lets a genuinely small specialist
+# (qwen3:4b, and after S5 fine-tuning qwen3:1.7b) hold the JSON contract the 4b
+# base model used to miss — swap `model` down in Move 2 once measured. `options`
+# overrides decoding per task (analyze_code emits a long findings array, so it
+# gets more tokens). Set `format: null` on a task to restore free-text output.
 tasks:
-  # qwen3:8b (matches the original vuln_scanner default). The 4b model is too
-  # weak to reliably emit the required JSON findings — it reasons that the code
-  # is vulnerable but rambles past its token budget without producing the JSON
-  # array, so findings come back empty. A *fine-tuned* 4b adapter (S5) is the
-  # paper's intended way to shrink these specialists; use qwen3:8b until then.
   analyze_code:
     backend: ollama
     model: ${ANALYZE_MODEL:-qwen3:8b}
+    format: json
+    options:
+      num_predict: 2048          # findings array can be long — give it headroom
   select_wordlists:
     backend: ollama
     model: ${WORDLIST_MODEL:-qwen3:8b}
+    format: json
   suggest_mitigations:
     backend: ollama
     model: ${MITIGATE_MODEL:-qwen3:8b}
+    format: json
 
 rag:
   chunks_zip: data/kb/rag_chunks.zip

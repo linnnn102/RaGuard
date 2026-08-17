@@ -56,6 +56,33 @@ fuzz: {}
     assert cfg.task("analyze_code").model == "qwen3-analyze-v2"
 
 
+def test_task_options_and_format_parsed(tmp_path):
+    cfg_path = _write(tmp_path, """
+version: v2
+orchestrator: {backend: openai, model: glm-4.5}
+backends: {ollama: {base_url: http://x}}
+tasks:
+  analyze_code:
+    backend: ollama
+    model: qwen3:4b
+    format: json
+    options: {num_predict: 2048}
+  select_wordlists:
+    backend: ollama
+    model: qwen3:1.7b
+rag: {}
+fuzz: {}
+""")
+    cfg = load_config(cfg_path)
+    analyze = cfg.task("analyze_code")
+    assert analyze.format == "json"
+    assert analyze.options == {"num_predict": 2048}
+    # A task that omits both keeps the pre-Move-1 defaults (free text, no overrides).
+    wl = cfg.task("select_wordlists")
+    assert wl.format is None
+    assert wl.options == {}
+
+
 def test_unknown_task_raises(tmp_path):
     cfg_path = _write(tmp_path, """
 version: v1

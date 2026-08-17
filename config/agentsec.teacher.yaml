@@ -1,0 +1,78 @@
+# agentsec router — TEACHER config: label training data with Kimi (cloud)
+# =======================================================================
+# Purpose: run the corpus scan so the analyze_code TEACHER is Kimi K2.7-code
+# (Moonshot, OpenAI-compatible) instead of a local Qwen. A stronger teacher →
+# better labels; you pay only for the one-time labeling pass. The DEPLOYED
+# specialist is still your fine-tuned local SLM, and the orchestrator, other
+# specialists, and RAG embedder all stay local so no cloud cost leaks in.
+#
+#   export MOONSHOT_API_KEY=sk-...
+#   AGENTSEC_CONFIG=config/agentsec.teacher.yaml python scripts/build_corpus.py scan
+#
+# ${VAR} / ${VAR:-default} are expanded from the environment at load time so the
+# API key never lives in the repo.
+
+version: teacher
+
+logging:
+  enabled: true
+  dir: logs/calls          # S1 — the Kimi-produced labels land here, as usual
+
+# Orchestrator stays LOCAL. The corpus scan never calls it; this only keeps the
+# config usable for the full pipeline too.
+orchestrator:
+  backend: openai
+  model: ${ORCH_MODEL:-qwen3:8b}
+  base_url: ${OLLAMA_OPENAI_URL:-http://localhost:11434/v1}
+  api_key: ${OLLAMA_API_KEY:-ollama}
+  temperature: 0.2
+  max_steps: 12
+
+backends:
+  ollama:
+    base_url: ${OLLAMA_URL:-http://localhost:11434}
+
+tasks:
+  # THE TEACHER — Kimi K2.7-code over Moonshot's OpenAI-compatible endpoint.
+  # base_url / api_key / max_tokens live in `options`, so this task hits Kimi
+  # independently of the (local) orchestrator above.
+  analyze_code:
+    backend: openai
+    model: ${TEACHER_MODEL:-kimi-k2.7-code}
+    options:
+      base_url: ${MOONSHOT_BASE_URL:-https://api.moonshot.ai/v1}
+      api_key: ${MOONSHOT_API_KEY:-}
+      max_tokens: 4096          # headroom so a long findings array can't truncate
+      # kimi-k2.7-code REQUIRES temperature: 1 (rejects any other value). For a
+      # model that accepts a range, lower this for more consistent labels; set to
+      # null to omit it entirely and use the server default.
+      temperature: 1
+      # Rate limiting for a low-RPM tier. 3 requests/min → keep ≥20s between
+      # calls; 21 leaves a margin. Raise the RPM (lower this) after a tier
+      # upgrade. Transient 429s are also retried up to max_retries.
+      min_request_interval_s: 21
+      max_retries: 6
+  # Not called by the corpus scan — kept local. Give them the same openai+options
+  # block if you later want Kimi to label their tasks too.
+  select_wordlists:
+    backend: ollama
+    model: ${WORDLIST_MODEL:-qwen3:8b}
+    format: json
+  suggest_mitigations:
+    backend: ollama
+    model: ${MITIGATE_MODEL:-qwen3:8b}
+    format: json
+
+rag:
+  chunks_zip: data/kb/rag_chunks.zip
+  top_k: 6
+  # Embeddings stay LOCAL — cheap, and avoids a cloud call on every retrieval.
+  embed_backend: ollama
+  embed_model: ${EMBED_MODEL:-qwen3-embedding:0.6b}
+
+fuzz:
+  target_url: ${FUZZ_TARGET_URL:-http://host.docker.internal:5055/user/FUZZ}
+  autocalibrate: false
+  match_codes: "500"
+  max_wordlists: 2
+  catalog: data/seclists_catalog.txt

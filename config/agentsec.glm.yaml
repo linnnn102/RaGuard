@@ -32,17 +32,25 @@ backends:
   ollama:
     base_url: ${OLLAMA_URL:-http://localhost:11434}
 
-# Specialist SLMs — one route per narrow task (local, unchanged).
+# Specialist SLMs — one route per narrow task (local). `format: json` (Move 1)
+# constrains each reply to valid JSON so a small model can hold the contract;
+# analyze_code gets extra tokens for its findings array. Shrink `model` toward
+# qwen3:4b / 1.7b in Move 2 once the untuned gap is measured.
 tasks:
   analyze_code:
     backend: ollama
     model: ${ANALYZE_MODEL:-qwen3}
+    format: json
+    options:
+      num_predict: 2048
   select_wordlists:
     backend: ollama
     model: ${WORDLIST_MODEL:-qwen3}
+    format: json
   suggest_mitigations:
     backend: ollama
     model: ${MITIGATE_MODEL:-qwen3}
+    format: json
 
 rag:
   chunks_zip: data/kb/rag_chunks.zip

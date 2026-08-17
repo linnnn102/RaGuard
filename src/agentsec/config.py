@@ -45,6 +45,13 @@ class TaskRoute:
     name: str
     backend: str
     model: str
+    # Per-task decoding overrides (num_predict, temperature, …) merged over the
+    # shared backend options. Lets a JSON-heavy task (analyze_code) raise its
+    # token budget without touching the others.
+    options: dict = field(default_factory=dict)
+    # Structured output for this task: "json" or a JSON-schema dict, passed to
+    # the backend's response_format. None keeps the pre-Move-1 free-text path.
+    format: "str | dict | None" = None
 
 
 @dataclass
@@ -122,7 +129,13 @@ def load_config(path: Optional[Path] = None) -> Config:
     )
 
     tasks = {
-        name: TaskRoute(name=name, backend=t["backend"], model=t["model"])
+        name: TaskRoute(
+            name=name,
+            backend=t["backend"],
+            model=t["model"],
+            options=dict(t.get("options") or {}),
+            format=t.get("format"),
+        )
         for name, t in raw.get("tasks", {}).items()
     }
 
