@@ -13,6 +13,23 @@ Writes the combined report (analysis + fuzzing + mitigations) to --output.
 
 from __future__ import annotations
 
+# ── run under the project venv, whatever `python` launched us ──────────────────
+# `python -m agentsec.cli …` picks up whichever interpreter is first on PATH
+# (often FreeCAD's, which lacks the project deps). Re-exec under .venv so the
+# command can't silently run the wrong one. No-op under .venv / the installed
+# `agentsec` console script, or when no .venv exists.
+if __name__ == "__main__":
+    import os as _os
+    import sys as _sys
+    from pathlib import Path as _P
+    for _parent in _P(__file__).resolve().parents:
+        _venv_py = _parent / ".venv" / "bin" / "python"
+        if _venv_py.exists():
+            if _P(_sys.executable).resolve() != _venv_py.resolve():
+                _argv = getattr(_sys, "orig_argv", None) or [_sys.executable, *_sys.argv]
+                _os.execv(str(_venv_py), [str(_venv_py), *_argv[1:]])
+            break
+
 import argparse
 import json
 import sys
@@ -106,12 +123,19 @@ def _check_ollama(config) -> bool:
         return False
 
     # Models are pulled on demand, but a missing one stalls mid-run for minutes
-    # with no explanation, so name them now.
+    # with no explanation, so name them now — but ONLY the ones Ollama actually
+    # serves. A task routed to a cloud backend (e.g. the Kimi teacher) must never
+    # be reported as "ollama pull …".
     rag = config.rag or {}
-    wanted = {
-        rag.get("embed_model") or "qwen3-embedding:0.6b",
-        config.task("analyze_code").model,
-    }
+    wanted = set()
+    if (rag.get("embed_backend") or "ollama") == "ollama":
+        wanted.add(rag.get("embed_model") or "qwen3-embedding:0.6b")
+    try:
+        analyze = config.task("analyze_code")
+        if analyze.backend == "ollama":
+            wanted.add(analyze.model)
+    except KeyError:
+        pass
     # Ollama reports "name:tag"; a bare name means the :latest tag.
     have = installed | {n.split(":")[0] for n in installed}
     missing = sorted(m for m in wanted if m and m not in have and m not in installed)
