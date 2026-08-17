@@ -34,6 +34,7 @@ class OllamaBackend(ModelClient):
         top_p: Optional[float] = None,
         timeout: int = 120,
         max_retries: int = 2,
+        response_format: Optional[object] = None,
     ):
         self.model = model
         self.base_url = base_url.rstrip("/")
@@ -43,6 +44,13 @@ class OllamaBackend(ModelClient):
         self.top_p = top_p
         self.timeout = timeout
         self.max_retries = max_retries
+        # Structured output (S4/Move-1): passed straight to Ollama's `format`
+        # field. Either the string "json" (constrain to *any* valid JSON — broad
+        # version support) or a JSON-schema dict (strict field/enum enforcement,
+        # needs a recent Ollama). This is what lets a small specialist (qwen3:4b
+        # / 1.7b) reliably close the findings JSON instead of rambling past its
+        # token budget. ``None`` reproduces the pre-Move-1 behaviour exactly.
+        self.response_format = response_format
 
     def _options(self) -> dict:
         opts = {"temperature": self.temperature, "num_predict": self.num_predict}
@@ -68,6 +76,8 @@ class OllamaBackend(ModelClient):
                 "stream": False,
                 "options": options,
             }
+            if self.response_format is not None:
+                payload["format"] = self.response_format
             if use_think_flag:
                 payload["think"] = False
             try:

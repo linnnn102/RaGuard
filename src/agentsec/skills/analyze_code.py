@@ -20,7 +20,12 @@ def analyze_code(
     file_path: str,
     min_severity: str = "LOW",
     top_k: int | None = None,
+    progress=None,
 ) -> dict:
+    # `progress`, if given, is called (index, total, fn_name) before each
+    # per-function model call — lets a batch driver (build_corpus scan) show
+    # live progress inside a function-dense file. The LLM tool path never sets
+    # it (it isn't in the parameters schema), so it defaults off.
     from ..prompts import analyze_system_prompt, build_analyze_prompt
     from ..rag.extractor import extract_functions
     from ..rag.parsing import SEVERITY_RANK, extract_json_array, validate_finding
@@ -48,7 +53,9 @@ def analyze_code(
 
     all_results = []
     t0 = time.time()
-    for fn in functions:
+    for idx, fn in enumerate(functions, 1):
+        if progress:
+            progress(idx, len(functions), fn["name"])
         rag_query = (
             f"Python function '{fn['name']}' vulnerability. "
             f"Args: {', '.join(fn['args'])}. {fn['source'][:400]}"
@@ -89,12 +96,19 @@ def analyze_code(
 
     all_findings = [f for r in all_results for f in r["findings"]]
     counts = Counter(f["severity"] for f in all_findings)
+    # How many per-function model calls actually succeeded. A run where every
+    # call failed (e.g. the model isn't pulled → 404) still parses as status=ok
+    # with empty findings; callers use calls_ok to tell "clean" from "dead".
+    calls_failed = sum(1 for r in all_results if r.get("error"))
+    calls_ok = len(all_results) - calls_failed
     return {
         "status": "ok",
         "summary": dict(counts),
         "findings": all_findings,
         "report_path": str(report_path),
         "functions_scanned": len(functions),
+        "calls_ok": calls_ok,
+        "calls_failed": calls_failed,
         "duration_s": round(elapsed, 2),
     }
 

@@ -19,6 +19,23 @@ Usage:
 
 from __future__ import annotations
 
+# ── run under the project venv, whatever `python` launched us ──────────────────
+# This machine has several interpreters (FreeCAD's bundled python, the framework
+# python3); only .venv has the project deps. Re-exec under it BEFORE importing
+# anything heavy, so a bare `python …/script.py` can't silently run the wrong one.
+# No-op when already under .venv, or when none exists.
+if __name__ == "__main__":
+    import os as _os
+    import sys as _sys
+    from pathlib import Path as _P
+    for _parent in _P(__file__).resolve().parents:
+        _venv_py = _parent / ".venv" / "bin" / "python"
+        if _venv_py.exists():
+            if _P(_sys.executable).resolve() != _venv_py.resolve():
+                _argv = getattr(_sys, "orig_argv", None) or [_sys.executable, *_sys.argv]
+                _os.execv(str(_venv_py), [str(_venv_py), *_argv[1:]])
+            break
+
 import argparse
 import subprocess
 import sys

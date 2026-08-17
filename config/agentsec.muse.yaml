@@ -1,0 +1,68 @@
+# agentsec router — TEACHER config: Muse Glimmer 30B via OpenRouter (cloud)
+# =========================================================================
+# Same shape as agentsec.teacher.yaml (Kimi), but the analyze_code teacher is
+# Meta's Muse Glimmer 30B over OpenRouter's OpenAI-compatible endpoint. Used to
+# compare teacher label quality against Kimi on the vuln_fixtures benchmark.
+#
+#   export OPENROUTER_API_KEY=sk-or-...
+#   python scripts/compare_teachers.py --teacher muse=config/agentsec.muse.yaml
+#
+# ${VAR} / ${VAR:-default} are expanded from the environment at load time so the
+# API key never lives in the repo.
+
+version: teacher-muse
+
+logging:
+  enabled: true
+  dir: logs/calls
+
+# Orchestrator stays LOCAL (not used by the comparison, which calls analyze_code).
+orchestrator:
+  backend: openai
+  model: ${ORCH_MODEL:-qwen3:8b}
+  base_url: ${OLLAMA_OPENAI_URL:-http://localhost:11434/v1}
+  api_key: ${OLLAMA_API_KEY:-ollama}
+  temperature: 0.2
+  max_steps: 12
+
+backends:
+  ollama:
+    base_url: ${OLLAMA_URL:-http://localhost:11434}
+
+tasks:
+  # THE TEACHER — Muse Glimmer 30B over OpenRouter (OpenAI-compatible).
+  analyze_code:
+    backend: openai
+    model: ${TEACHER_MODEL:-meta/muse-glimmer-30b}
+    options:
+      base_url: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      # NEVER hardcode the key here — this file is tracked by git. Export it in
+      # your shell instead:  export OPENROUTER_API_KEY=sk-or-...
+      api_key: ${OPENROUTER_API_KEY:-}
+      max_tokens: 4096
+      temperature: 0.1          # Muse accepts a range → low temp for stable labels
+      # No client-side throttle — OpenRouter's paid limits are generous. If you
+      # do hit a 429, the retry path backs off exponentially (see OpenAIBackend).
+      min_request_interval_s: 0
+      max_retries: 4
+  select_wordlists:
+    backend: ollama
+    model: ${WORDLIST_MODEL:-qwen3:8b}
+    format: json
+  suggest_mitigations:
+    backend: ollama
+    model: ${MITIGATE_MODEL:-qwen3:8b}
+    format: json
+
+rag:
+  chunks_zip: data/kb/rag_chunks.zip
+  top_k: 6
+  embed_backend: ollama
+  embed_model: ${EMBED_MODEL:-qwen3-embedding:0.6b}
+
+fuzz:
+  target_url: ${FUZZ_TARGET_URL:-http://host.docker.internal:5055/user/FUZZ}
+  autocalibrate: false
+  match_codes: "500"
+  max_wordlists: 2
+  catalog: data/seclists_catalog.txt

@@ -32,9 +32,27 @@ Usage:
 
 from __future__ import annotations
 
+# ── run under the project venv, whatever `python` launched us ──────────────────
+# This machine has several interpreters (FreeCAD's bundled python, the framework
+# python3); only .venv has the project deps. Re-exec under it BEFORE importing
+# anything heavy, so a bare `python …/script.py` can't silently run the wrong one.
+# No-op when already under .venv, or when none exists.
+if __name__ == "__main__":
+    import os as _os
+    import sys as _sys
+    from pathlib import Path as _P
+    for _parent in _P(__file__).resolve().parents:
+        _venv_py = _parent / ".venv" / "bin" / "python"
+        if _venv_py.exists():
+            if _P(_sys.executable).resolve() != _venv_py.resolve():
+                _argv = getattr(_sys, "orig_argv", None) or [_sys.executable, *_sys.argv]
+                _os.execv(str(_venv_py), [str(_venv_py), *_argv[1:]])
+            break
+
 import argparse
 import csv
 import json
+import statistics
 import sys
 from pathlib import Path
 
@@ -122,6 +140,41 @@ def score_quality(report_path: Path, labels: dict) -> dict:
     }
 
 
+def score_benign(report_path: Path, labels: dict) -> dict:
+    """False positives on known-clean functions (`expected_clean`). A shrunk
+    model that over-flags safe code shows up here even when its recall looks
+    fine — this is the precision half of the capability claim (C1)."""
+    predicted = _findings_from_report(report_path)
+    flagged = {fn for (fn, _cwe) in predicted}
+    clean = labels.get("expected_clean", []) or []
+    fp = sum(1 for fn in clean if fn in flagged)
+    total = len(clean)
+    return {
+        "benign_total": total,
+        "benign_fp": fp,
+        "benign_acc": round((total - fp) / total, 3) if total else "",
+    }
+
+
+def score_per_cwe(report_path: Path, labels: dict) -> dict:
+    """Per-CWE precision/recall/F1 — which weaknesses the small model keeps vs
+    drops. Same tp/fp/fn logic as score_quality, sliced by cwe_id."""
+    predicted = _findings_from_report(report_path)
+    expected = {(e["function"], e["cwe_id"]) for e in labels.get("expected_findings", [])}
+    out = {}
+    for cwe in sorted({c for (_f, c) in expected} | {c for (_f, c) in predicted}):
+        p = {x for x in predicted if x[1] == cwe}
+        e = {x for x in expected if x[1] == cwe}
+        tp, fp, fn = len(p & e), len(p - e), len(e - p)
+        prec = tp / (tp + fp) if (tp + fp) else 0.0
+        rec = tp / (tp + fn) if (tp + fn) else 0.0
+        f1 = 2 * prec * rec / (prec + rec) if (prec + rec) else 0.0
+        out[cwe] = {"tp": tp, "fp": fp, "fn": fn,
+                    "precision": round(prec, 3), "recall": round(rec, 3),
+                    "f1": round(f1, 3)}
+    return out
+
+
 def score_mitigation_validity(full_report_path: Path) -> dict:
     """Fraction of mitigations that parsed and carry non-empty fixed_code."""
     if not full_report_path.exists():
@@ -143,36 +196,57 @@ def score_mitigation_validity(full_report_path: Path) -> dict:
 # ── running an arm live ────────────────────────────────────────────────────────
 
 def run_arm(name: str, config_path: Path, target: str, execute_fuzz: bool,
-            sequential: bool = False) -> dict:
+            sequential: bool = False, repeat: int = 0) -> dict:
+    import shutil
     sys.path.insert(0, str(PROJECT_ROOT / "src"))
     from agentsec.config import load_config
     from agentsec.orchestrator import run_agent, run_sequential
 
     config = load_config(config_path)
-    # Isolate this arm's logs so metrics don't bleed across arms.
-    config.logging.dir = PROJECT_ROOT / "logs" / "eval" / name
-    out_path = PROJECT_ROOT / "results" / "eval" / f"{name}.full_report.json"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    # Per-repeat isolation: append-only logs must NOT accumulate across repeats
+    # (that would inflate token/latency totals), so each run gets a fresh dir.
+    logs_dir = PROJECT_ROOT / "logs" / "eval" / name / f"r{repeat}"
+    if logs_dir.exists():
+        shutil.rmtree(logs_dir)
+    config.logging.dir = logs_dir
+
+    out_dir = PROJECT_ROOT / "results" / "eval" / name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    report_path = out_dir / f"r{repeat}.vuln_report.json"
+    full_report = out_dir / f"r{repeat}.full_report.json"
+    # Point analyze_code's report at this repeat's path (skill reads fuzz.report_path).
+    config.fuzz = dict(config.fuzz or {})
+    config.fuzz["report_path"] = str(report_path)
 
     runner = run_sequential if sequential else run_agent
     result = runner(target_file=target, config=config, execute_fuzz=execute_fuzz)
-    out_path.write_text(json.dumps(result, indent=2, default=str))
-    return {"logs_dir": config.logging.dir, "full_report": out_path}
+    full_report.write_text(json.dumps(result, indent=2, default=str))
+    return {"logs_dir": logs_dir, "full_report": full_report, "report_path": report_path}
 
 
 # ── table rendering ────────────────────────────────────────────────────────────
 
-def render(rows: list[dict], out_dir: Path):
+def render(rows: list[dict], per_cwe_by_arm: dict, out_dir: Path):
     out_dir.mkdir(parents=True, exist_ok=True)
-    cols = ["arm", "e2e_latency_s", "prompt_tokens", "completion_tokens",
-            "usd", "precision", "recall", "f1", "mitigation_validity"]
+    cols = ["arm", "runs", "e2e_latency_s", "prompt_tokens", "completion_tokens",
+            "usd", "precision", "recall", "f1", "benign_acc", "mitigation_validity"]
 
-    md = ["| " + " | ".join(cols) + " |",
+    md = ["## Main results (mean ± std over `runs`)", "",
+          "| " + " | ".join(cols) + " |",
           "|" + "|".join(["---"] * len(cols)) + "|"]
     for r in rows:
         md.append("| " + " | ".join(str(r.get(c, "")) for c in cols) + " |")
-    (out_dir / "eval_table.md").write_text("\n".join(md) + "\n")
 
+    all_cwes = sorted({c for pc in per_cwe_by_arm.values() for c in pc})
+    if all_cwes:
+        arms = list(per_cwe_by_arm.keys())
+        md += ["", "## Per-CWE F1", "",
+               "| CWE | " + " | ".join(arms) + " |",
+               "|" + "|".join(["---"] * (len(arms) + 1)) + "|"]
+        for cwe in all_cwes:
+            md.append("| " + " | ".join([cwe] + [per_cwe_by_arm[a].get(cwe, "") for a in arms]) + " |")
+
+    (out_dir / "eval_table.md").write_text("\n".join(md) + "\n")
     with (out_dir / "eval_table.csv").open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
@@ -180,7 +254,62 @@ def render(rows: list[dict], out_dir: Path):
             w.writerow({c: r.get(c, "") for c in cols})
 
     print("\n".join(md))
-    print(f"\n[eval] wrote {out_dir/'eval_table.md'} and eval_table.csv")
+    print(f"\n[eval] wrote {out_dir/'eval_table.md'}, eval_table.csv, raw_runs.json")
+
+
+def _score_one(logs_dir, report_path, full_report, labels, mitigation=True) -> dict:
+    """All metrics for a single run — the unit that gets aggregated over repeats."""
+    metrics = load_log_metrics(logs_dir) if Path(logs_dir).exists() else {"totals": {}}
+    return {
+        "metrics": metrics,
+        "quality": score_quality(report_path, labels),
+        "benign": score_benign(report_path, labels),
+        "valid": score_mitigation_validity(full_report) if mitigation else {"validity": ""},
+        "per_cwe": score_per_cwe(report_path, labels),
+    }
+
+
+def _mean_std(vals):
+    nums = [v for v in vals if isinstance(v, (int, float))]
+    if not nums:
+        return (None, None)
+    return (statistics.fmean(nums), statistics.pstdev(nums) if len(nums) > 1 else 0.0)
+
+
+def _fmt(mean, std, reps, dp=3) -> str:
+    if mean is None:
+        return ""
+    if reps <= 1 or not std:
+        return f"{mean:.{dp}f}"
+    return f"{mean:.{dp}f} ± {std:.{dp}f}"
+
+
+def _aggregate_row(name, reps, n_reps) -> dict:
+    def totals(k): return [r["metrics"].get("totals", {}).get(k) for r in reps]
+    def q(g, k): return [r[g].get(k) for r in reps]
+    spec = [
+        ("e2e_latency_s", totals("latency_s"), 2),
+        ("prompt_tokens", totals("prompt_tokens"), 0),
+        ("completion_tokens", totals("completion_tokens"), 0),
+        ("usd", totals("usd"), 6),
+        ("precision", q("quality", "precision"), 3),
+        ("recall", q("quality", "recall"), 3),
+        ("f1", q("quality", "f1"), 3),
+        ("benign_acc", q("benign", "benign_acc"), 3),
+        ("mitigation_validity", q("valid", "validity"), 3),
+    ]
+    row = {"arm": name, "runs": n_reps}
+    for col, vals, dp in spec:
+        row[col] = _fmt(*_mean_std(vals), n_reps, dp)
+    return row
+
+
+def _aggregate_per_cwe(reps, n_reps) -> dict:
+    out = {}
+    for cwe in sorted({c for r in reps for c in r["per_cwe"]}):
+        f1s = [r["per_cwe"][cwe]["f1"] for r in reps if cwe in r["per_cwe"]]
+        out[cwe] = _fmt(*_mean_std(f1s), n_reps, 3)
+    return out
 
 
 def main():
@@ -189,9 +318,11 @@ def main():
                    default=PROJECT_ROOT / "eval/labels/test_target2.labels.json")
     p.add_argument("--target", default="targets/test_target2.py")
     p.add_argument("--run", action="store_true", help="Run each arm live before scoring")
+    p.add_argument("--repeats", type=int, default=1,
+                   help="Runs per arm (with --run); metrics reported as mean ± std.")
     p.add_argument("--execute-fuzz", action="store_true")
     p.add_argument("--arm", action="append", default=[],
-                   help="name=config_path (repeatable). Default: score current logs/report.")
+                   help="name=config_path[:seq] (repeatable). Default: score current artifacts.")
     p.add_argument("--report", type=Path,
                    default=PROJECT_ROOT / "results/reports/vuln_report.json",
                    help="vuln_report.json for score-only mode")
@@ -200,50 +331,41 @@ def main():
     args = p.parse_args()
 
     labels = json.loads(args.labels.read_text())
-    rows = []
+    rows, per_cwe_by_arm, raw = [], {}, {}
 
     if args.arm:
         for spec in args.arm:
             name, _, cfg = spec.partition("=")
-            # optional ":seq" suffix runs this arm through the fixed-order
-            # baseline instead of the orchestrator loop
-            cfg, _, mode = cfg.partition(":")
+            cfg, _, mode = cfg.partition(":")   # optional ":seq" → fixed-order baseline
             sequential = mode == "seq"
             cfg_path = Path(cfg)
-            if args.run:
-                arts = run_arm(name, cfg_path, args.target, args.execute_fuzz, sequential)
-                logs_dir, full_report = arts["logs_dir"], arts["full_report"]
-                report_path = PROJECT_ROOT / "results/reports/vuln_report.json"
-            else:
-                logs_dir = PROJECT_ROOT / "logs" / "eval" / name
-                full_report = PROJECT_ROOT / "results" / "eval" / f"{name}.full_report.json"
-                report_path = PROJECT_ROOT / "results/reports/vuln_report.json"
-            metrics = load_log_metrics(logs_dir) if logs_dir.exists() else {"totals": {}}
-            quality = score_quality(report_path, labels)
-            valid = score_mitigation_validity(full_report)
-            rows.append(_row(name, metrics, quality, valid))
+            n_reps = max(1, args.repeats) if args.run else 1
+            reps = []
+            for r in range(n_reps):
+                if args.run:
+                    arts = run_arm(name, cfg_path, args.target, args.execute_fuzz, sequential, r)
+                    logs_dir, full_report, report_path = (
+                        arts["logs_dir"], arts["full_report"], arts["report_path"])
+                else:
+                    base = PROJECT_ROOT / "results" / "eval" / name
+                    logs_dir = PROJECT_ROOT / "logs" / "eval" / name / f"r{r}"
+                    full_report = base / f"r{r}.full_report.json"
+                    report_path = base / f"r{r}.vuln_report.json"
+                reps.append(_score_one(logs_dir, report_path, full_report, labels))
+            rows.append(_aggregate_row(name, reps, n_reps))
+            per_cwe_by_arm[name] = _aggregate_per_cwe(reps, n_reps)
+            raw[name] = reps
     else:
-        # score-only from the default artifacts (M3 smoke output)
-        metrics = load_log_metrics(args.logs_dir) if args.logs_dir.exists() else {"totals": {}}
-        quality = score_quality(args.report, labels)
-        rows.append(_row("current", metrics, quality, {"validity": ""}))
+        reps = [_score_one(args.logs_dir, args.report,
+                           PROJECT_ROOT / "results/eval/current.full_report.json",
+                           labels, mitigation=False)]
+        rows.append(_aggregate_row("current", reps, 1))
+        per_cwe_by_arm["current"] = _aggregate_per_cwe(reps, 1)
+        raw["current"] = reps
 
-    render(rows, args.out_dir)
-
-
-def _row(name, metrics, quality, valid) -> dict:
-    totals = metrics.get("totals", {})
-    return {
-        "arm": name,
-        "e2e_latency_s": totals.get("latency_s", ""),
-        "prompt_tokens": totals.get("prompt_tokens", ""),
-        "completion_tokens": totals.get("completion_tokens", ""),
-        "usd": totals.get("usd", ""),
-        "precision": quality.get("precision", ""),
-        "recall": quality.get("recall", ""),
-        "f1": quality.get("f1", ""),
-        "mitigation_validity": valid.get("validity", ""),
-    }
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    (args.out_dir / "raw_runs.json").write_text(json.dumps(raw, indent=2, default=str))
+    render(rows, per_cwe_by_arm, args.out_dir)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,131 @@
+{
+  "name": "muse",
+  "model": "meta/muse-glimmer-30b",
+  "predicted": {
+    "login": [
+      "CWE-1254"
+    ],
+    "verify_token": [
+      "CWE-306"
+    ],
+    "set_role": [
+      "CWE-285"
+    ],
+    "delete_account": [
+      "CWE-306"
+    ],
+    "view_invoice": [],
+    "admin_reset_all": [
+      "CWE-306"
+    ],
+    "get_db_connection": [
+      "CWE-259",
+      "CWE-798"
+    ],
+    "api_client": [
+      "CWE-798"
+    ],
+    "_lookup_password": [
+      "CWE-1391"
+    ],
+    "_db_delete": [],
+    "_db_get": [],
+    "_db_truncate": [],
+    "_connect": [],
+    "_safe_compare": [],
+    "calc": [
+      "CWE-95"
+    ],
+    "apply_rule": [
+      "CWE-95"
+    ],
+    "evaluate_formula": [
+      "CWE-95",
+      "CWE-627"
+    ],
+    "dynamic_import": [
+      "CWE-913",
+      "CWE-627"
+    ],
+    "hash_password": [
+      "CWE-916",
+      "CWE-328"
+    ],
+    "sign_token": [
+      "CWE-1270"
+    ],
+    "encrypt_secret": [
+      "CWE-326"
+    ],
+    "load_session": [
+      "CWE-502"
+    ],
+    "parse_yaml": [],
+    "load_cache": [
+      "CWE-502"
+    ],
+    "read_file": [
+      "CWE-22"
+    ],
+    "download": [
+      "CWE-22"
+    ],
+    "get_log": [
+      "CWE-22"
+    ],
+    "render_page": [
+      "CWE-1336"
+    ],
+    "greet": [
+      "CWE-1336",
+      "CWE-79"
+    ],
+    "make_email": [
+      "CWE-95"
+    ],
+    "run_ping": [],
+    "backup_database": [
+      "CWE-22"
+    ],
+    "convert_image": [
+      "CWE-78"
+    ],
+    "tail_log": [
+      "CWE-77"
+    ],
+    "fetch_url": [
+      "CWE-918"
+    ],
+    "proxy_request": [
+      "CWE-441"
+    ],
+    "load_avatar": [
+      "CWE-20",
+      "CWE-601"
+    ],
+    "parse_xml": [
+      "CWE-611",
+      "CWE-776"
+    ],
+    "load_config_xml": [
+      "CWE-611",
+      "CWE-776"
+    ],
+    "render_greeting": [
+      "CWE-79"
+    ],
+    "show_comment": [
+      "CWE-79"
+    ],
+    "search_results": [
+      "CWE-79"
+    ]
+  },
+  "no_data": [],
+  "from_log": false,
+  "metrics": {
+    "prompt_tokens": 71762,
+    "completion_tokens": 47878
+  },
+  "target": "/Users/lin/Desktop/\u5f62\u800c\u4e0a\u5b66/thesis/final_code/data/vuln_fixtures"
+}

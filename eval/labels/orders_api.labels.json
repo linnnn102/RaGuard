@@ -1,0 +1,24 @@
+{
+  "target": "eval/testset/orders_api.py",
+  "description": "Held-out fixture: SQL injection + OS command injection + one benign handler.",
+  "expected_findings": [
+    {
+      "function": "get_order",
+      "cwe_id": "CWE-89",
+      "cwe_name": "SQL Injection",
+      "min_severity": "HIGH",
+      "line_hint": "cur.execute(f\"SELECT * FROM orders WHERE id = '{order_id}'\")",
+      "notes": "order_id f-string-concatenated into the SQL query."
+    },
+    {
+      "function": "export_orders",
+      "cwe_id": "CWE-78",
+      "cwe_name": "OS Command Injection",
+      "min_severity": "CRITICAL",
+      "line_hint": "os.system(f\"tar czf /tmp/orders.{fmt} /var/orders\")",
+      "notes": "fmt interpolated into a shell command passed to os.system."
+    }
+  ],
+  "expected_clean": ["list_orders"],
+  "expected_dynamic_confirmation": {"CWE-89": true, "CWE-78": true}
+}

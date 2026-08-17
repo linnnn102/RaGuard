@@ -68,3 +68,10 @@ targets/test_target2.py
 
 # chunking & fine tuning code
 pre_code/
+
+# S5 pipeline artifacts (regenerable; corpus_src holds cloned upstream repos)
+data/corpus/
+data/corpus_src/
+data/train/
+data/export/
+results/
