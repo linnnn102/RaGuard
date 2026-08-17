@@ -51,6 +51,10 @@ logs/
 # Local scratch notes
 actionitems.txt
 
+# Presentation build of the diagrams — local use only; docs/architecture.md is
+# the versioned source and renders the same three views on GitHub.
+docs/architecture.html
+
 # Generated pipeline outputs
 results/fuzz/
 results/scripts/fuzz.sh

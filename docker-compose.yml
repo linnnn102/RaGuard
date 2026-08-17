@@ -32,8 +32,9 @@
 # /var/run/docker.sock — which grants it effective root on the host and would
 # undo every hardening measure below. Instead the runner image bundles ffuf +
 # SecLists, so the fuzz step executes `bash fuzz.sh` in-process. No socket, no
-# nested Docker. The standalone `vuln-fuzzer` image is still built under the
-# `tools` profile for host-side runs (fuzz.py auto-detects which mode it is in).
+# nested Docker. The standalone `vuln-fuzzer` image is no longer a service here;
+# host-side runs build it directly with `docker build -t vuln-fuzzer .` (fuzz.py
+# auto-detects which mode it is in).
 #
 services:
   target:
@@ -223,47 +224,3 @@ services:
       - --output
       - results/reports/full_report.json
 
-  # Standalone ffuf image, kept for HOST-side runs (`--tool fuzz` outside
-  # compose). fuzz.py auto-detects: inside the runner it executes fuzz.sh
-  # directly; on the host it spawns this image. Build-only — never started by
-  # `docker compose up`.
-  fuzzer:
-    profiles: ["tools"]
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: vuln-fuzzer
-    # Matching hardening for the job container. fuzz.py applies the equivalent
-    # flags on its `docker run` invocation; these apply if you run it by hand.
-    # The uid defaults are overridable because /results is a bind mount — on
-    # native-Linux Docker the container uid must be able to write the host dir,
-    # so fuzz.py passes the HOST's uid:gid. Match that here with:
-    #   DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) docker compose --profile tools run fuzzer
-    user: "${DOCKER_UID:-10001}:${DOCKER_GID:-10001}"
-    privileged: false
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=64m
-    environment:
-      # ffuf opens $HOME/.config/ffuf/scraper at startup; an unset HOME resolves
-      # to "/", which is read-only. Point it at the tmpfs.
-      HOME: /tmp
-    cpus: 2.0
-    mem_limit: 1g
-    pids_limit: 512
-    command: ["bash", "/fuzz/fuzz.sh"]
-
-# Tighter option: to also cut the target's OUTBOUND internet access (blocks
-# reverse shells / data exfil, but also breaks the /fetch SSRF demo to the
-# public internet), attach it to an internal network:
-#
-#   services:
-#     target:
-#       networks: [sandbox]
-#   networks:
-#     sandbox:
-#       internal: true

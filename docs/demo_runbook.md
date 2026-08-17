@@ -33,7 +33,7 @@ ollama pull qwen3-embedding:0.6b  # RAG retrieval embedder (0.091 s/query warm)
 
 # 2. Build both containers (target + the pipeline runner).
 docker compose build              # builds `target` and `runner`
-docker compose --profile tools build fuzzer   # optional: host-side ffuf image
+docker build -t vuln-fuzzer .                 # optional: host-side ffuf image
 
 # 3. Full timed dry-run of Part 2, and RECORD it as the fallback.
 asciinema rec docs/defense_fallback.cast      # Ctrl-D to stop
