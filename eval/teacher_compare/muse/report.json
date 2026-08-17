@@ -1,0 +1,217 @@
+{
+  "meta": {
+    "tool": "vuln_scanner",
+    "version": "1.0.0",
+    "target": "/Users/lin/Desktop/\u5f62\u800c\u4e0a\u5b66/thesis/final_code/data/vuln_fixtures/web_requests.py",
+    "model": "meta/muse-glimmer-30b",
+    "scan_date": "2026-08-13T19:37:38.312753Z",
+    "duration_s": 115.48
+  },
+  "summary": {
+    "total_functions": 8,
+    "functions_with_findings": 8,
+    "total_findings": 11,
+    "by_severity": {
+      "CRITICAL": 0,
+      "HIGH": 9,
+      "MEDIUM": 2,
+      "LOW": 0,
+      "INFO": 0
+    }
+  },
+  "results": [
+    {
+      "function": "fetch_url",
+      "file": "/Users/lin/Desktop/\u5f62\u800c\u4e0a\u5b66/thesis/final_code/data/vuln_fixtures/web_requests.py",
+      "line_start": 13,
+      "line_end": 14,
+      "findings": [
+        {
+          "cwe_id": "CWE-918",
+          "cwe_name": "Server-Side Request Forgery (SSRF)",
+          "severity": "HIGH",
+          "confidence": 0.9,
+          "line_hint": "line 2 - requests.get(url)",
+          "description": "The function directly uses a caller-supplied url argument as the target of requests.get without validation, allowlisting, or network restrictions. An attacker controlling the url can cause the server to make arbitrary HTTP requests to internal or external destinations, enabling SSRF attacks such as accessing metadata services, internal admin interfaces, or port scanning.",
+          "evidence": "return requests.get(url).text",
+          "solution": "Validate and sanitize the url before use: parse with urllib.parse, allow only http/https schemes, enforce an allowlist of hostnames, block private/reserved IP ranges, and set timeouts. Example: parsed = urllib.parse.urlparse(url); if parsed.scheme not in ('http','https') or parsed.hostname not in ALLOWED_HOSTS: raise ValueError; requests.get(url, timeout=5, allow_redirects=False)",
+          "references": []
+        }
+      ]
+    },
+    {
+      "function": "proxy_request",
+      "file": "/Users/lin/Desktop/\u5f62\u800c\u4e0a\u5b66/thesis/final_code/data/vuln_fixtures/web_requests.py",
+      "line_start": 17,
+      "line_end": 18,
+      "findings": [
+        {
+          "cwe_id": "CWE-441",
+          "cwe_name": "Unintended Proxy or Intermediary ('Confused Deputy')",
+          "severity": "HIGH",
+          "confidence": 0.9,
+          "line_hint": "line 2, argument handling",
+          "description": "The function accepts an arbitrary user-controlled target URL and forwards the request to it using urllib.request.urlopen without validation or restriction. This turns the application into an open proxy / confused deputy, allowing an attacker to make the product fetch internal or external resources on the product's behalf, bypass network controls, hide the source of requests, and potentially reach services the attacker cannot contact directly.",
+          "evidence": "return urllib.request.urlopen(target).read()",
+          "solution": "Do not use unsanitized external input as a URL target. If proxying is required, enforce a strict allowlist of schemes, hosts and ports, validate and normalize the target URL, and preserve/forward the original requestor identity. For example, reject non-http(s) schemes and check target against an allowlist before opening:\n    from urllib.parse import urlparse\n    allowed = {'https://api.example.com'}\n    parsed = urlparse(target)\n    if parsed.scheme not in ('http','https') or f'{parsed.scheme}://{parsed.netloc}' not in allowed:\n        raise ValueError('Disallowed target')\n    return urllib.request.urlopen(target).read()",
+          "references": []
+        }
+      ]
+    },
+    {
+      "function": "load_avatar",
+      "file": "/Users/lin/Desktop/\u5f62\u800c\u4e0a\u5b66/thesis/final_code/data/vuln_fixtures/web_requests.py",
+      "line_start": 21,
+      "line_end": 23,
+      "findings": [
+        {
+          "cwe_id": "CWE-20",
+          "cwe_name": "Improper Input Validation",
+          "severity": "HIGH",
+          "confidence": 0.78,
+          "line_hint": "line 2 argument handling",
+          "description": "The function accepts a user-controlled image_url and passes it directly to requests.get with allow_redirects=True without any validation of scheme, host, or redirect targets. This allows an attacker to supply internal, file, or attacker-controlled URLs and cause the server to fetch arbitrary resources, leading to Server-Side Request Forgery and information disclosure. The lack of an accept-known-good validation strategy is the classic improper input validation pattern.",
+          "evidence": "resp = requests.get(image_url, allow_redirects=True)",
+          "solution": "Validate and canonicalize image_url before use. Whitelist schemes to http/https only, enforce an allowlist of trusted domains/IPs, reject private/reserved ranges, disable or limit redirects, and set timeouts and size limits. Example:\nfrom urllib.parse import urlparse\nALLOWED_HOSTS = {'cdn.example.com'}\nparsed = urlparse(image_url)\nif parsed.scheme not in ('http','https') or parsed.hostname not in ALLOWED_HOSTS:\n    raise ValueError('Invalid URL')\nresp = requests.get(image_url, allow_redirects=False, timeout=5)",
+          "references": [
+            "CVE-2002-2314"
+          ]
+        },
+        {
+          "cwe_id": "CWE-601",
+          "cwe_name": "URL Redirection to Untrusted Site ('Open Redirect')",
+          "severity": "MEDIUM",
+          "confidence": 0.65,
+          "line_hint": "line 2 allow_redirects=True",
+          "description": "User-controlled image_url is used with allow_redirects=True, so the request will automatically follow HTTP redirects to destinations controlled by the attacker. Without an approved URL/domain list, the server can be induced to fetch content from untrusted sites, which is the server-side analogue of open redirect and enables SSRF and data exfiltration.",
+          "evidence": "resp = requests.get(image_url, allow_redirects=True)",
+          "solution": "Do not follow redirects automatically for untrusted input, or restrict redirects to an allowlist of trusted domains. Validate the final URL after redirects and reject redirects to non-approved hosts. Example: requests.get(image_url, allow_redirects=False, timeout=5) and manually verify Location headers against an allowlist.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "function": "parse_xml",
+      "file": "/Users/lin/Desktop/\u5f62\u800c\u4e0a\u5b66/thesis/final_code/data/vuln_fixtures/web_requests.py",
+      "line_start": 26,
+      "line_end": 28,
+      "findings": [
+        {
+          "cwe_id": "CWE-611",
+          "cwe_name": "Improper Restriction of XML External Entity Reference",
+          "severity": "HIGH",
+          "confidence": 0.95,
+          "line_hint": "parser initialization line 3",
+          "description": "The XML parser is created with resolve_entities=True and no_network=False, allowing external entity expansion and network access during parsing. An attacker-controlled XML document can define external entities referencing local files or remote URLs, leading to XXE attacks for data exfiltration, SSRF, or denial of service.",
+          "evidence": "parser = etree.XMLParser(resolve_entities=True, no_network=False)",
+          "solution": "Disable external entity resolution and network access. Use a safe parser configuration, e.g., etree.XMLParser(resolve_entities=False, no_network=True, dtd_validation=False) or preferably defusedxml.defuse_stdlib(). For lxml: parser = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False); return etree.fromstring(data, parser). Validate and sanitize input before parsing.",
+          "references": []
+        },
+        {
+          "cwe_id": "CWE-776",
+          "cwe_name": "Improper Restriction of Recursive Entity References in DTDs ('XML Entity Expansion')",
+          "severity": "HIGH",
+          "confidence": 0.9,
+          "line_hint": "parser initialization line 3",
+          "description": "With resolve_entities=True and no entity expansion limits, the parser will expand recursive or deeply nested entity definitions in a DTD. An attacker can supply a malicious XML bomb with exponential entity expansion causing excessive CPU and memory consumption, resulting in denial of service.",
+          "evidence": "parser = etree.XMLParser(resolve_entities=True, no_network=False)\nreturn etree.fromstring(data, parser)",
+          "solution": "Prohibit DTD processing and limit entity expansion. Configure the parser to disable entity resolution and DTD loading, e.g., etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False) and set parser.entity = {}. Using defusedxml.XMLParser or lxml with entity limits is recommended. Reject XML containing DOCTYPE declarations.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "function": "load_config_xml",
+      "file": "/Users/lin/Desktop/\u5f62\u800c\u4e0a\u5b66/thesis/final_code/data/vuln_fixtures/web_requests.py",
+      "line_start": 31,
+      "line_end": 33,
+      "findings": [
+        {
+          "cwe_id": "CWE-611",
+          "cwe_name": "Improper Restriction of XML External Entity Reference",
+          "severity": "HIGH",
+          "confidence": 0.95,
+          "line_hint": "line 2 - XMLParser initialization",
+          "description": "The XML parser is created with resolve_entities=True, allowing XML External Entity expansion. An attacker-controlled XML file can define external entities referencing local files, URLs or internal services, causing the parser to fetch and embed them during parsing. This enables XXE attacks leading to disclosure of application data, file system access, SSRF and potential protection mechanism bypass.",
+          "evidence": "parser = etree.XMLParser(resolve_entities=True)",
+          "solution": "Disable external entity resolution and DTD processing for untrusted input. Example with lxml: parser = etree.XMLParser(resolve_entities=False, no_network=True, dtd_validation=False) or preferably use defusedxml: from defusedxml import lxml as safe_lxml; safe_lxml.parse(path). Validate and sanitize XML input and never parse untrusted XML with entity resolution enabled.",
+          "references": []
+        },
+        {
+          "cwe_id": "CWE-776",
+          "cwe_name": "Improper Restriction of Recursive Entity References in DTDs",
+          "severity": "MEDIUM",
+          "confidence": 0.9,
+          "line_hint": "line 2 - XMLParser initialization",
+          "description": "With resolve_entities=True the parser will expand entity references defined in DTDs. A malicious XML document can contain deeply nested or recursive entity definitions that cause exponential expansion of the document in memory, leading to XML Entity Expansion / Billion Laughs denial of service via CPU and memory exhaustion.",
+          "evidence": "parser = etree.XMLParser(resolve_entities=True)\nreturn etree.parse(path, parser)",
+          "solution": "Prohibit DTDs or limit entity expansion. Disable entity resolution and set parser limits, e.g., parser = etree.XMLParser(resolve_entities=False, no_network=True) and use a hardened parser such as defusedxml which enforces entity limits. Alternatively pre-scan DTDs for recursive entities and reject documents that define them.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "function": "render_greeting",
+      "file": "/Users/lin/Desktop/\u5f62\u800c\u4e0a\u5b66/thesis/final_code/data/vuln_fixtures/web_requests.py",
+      "line_start": 36,
+      "line_end": 37,
+      "findings": [
+        {
+          "cwe_id": "CWE-79",
+          "cwe_name": "Cross-site Scripting",
+          "severity": "HIGH",
+          "confidence": 0.95,
+          "line_hint": "line 2 return statement",
+          "description": "The function interpolates the user-controlled `name` argument directly into an HTML string without any encoding or validation. An attacker can supply a value containing HTML/JavaScript such as `<script>alert(1)</script>` which will be reflected verbatim in the response and executed in the victim's browser, leading to session hijacking, defacement, or other XSS impacts.",
+          "evidence": "return f\"<h1>Welcome back, {name}!</h1>\"",
+          "solution": "Encode user input for the HTML context before interpolation. Example: import html; return f\"<h1>Welcome back, {html.escape(name)}!</h1>\". Prefer a templating engine with auto-escaping enabled for all output.",
+          "references": [
+            "CVE-2002-2377"
+          ]
+        }
+      ]
+    },
+    {
+      "function": "show_comment",
+      "file": "/Users/lin/Desktop/\u5f62\u800c\u4e0a\u5b66/thesis/final_code/data/vuln_fixtures/web_requests.py",
+      "line_start": 40,
+      "line_end": 41,
+      "findings": [
+        {
+          "cwe_id": "CWE-79",
+          "cwe_name": "Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')",
+          "severity": "HIGH",
+          "confidence": 0.95,
+          "line_hint": "line 2 return statement",
+          "description": "The function builds an HTML string by directly concatenating user-controlled `comment` into a <div>. No HTML entity encoding or output encoding is performed, so an attacker can supply markup such as <script>...</script> or event-handler attributes that will be rendered and executed in the browsers of other users. This is classic reflected/stored XSS.",
+          "evidence": "return \"<div class='comment'>\" + comment + \"</div>\"",
+          "solution": "Encode output before embedding it in HTML. In Python: import html; return \"<div class='comment'>\" + html.escape(comment, quote=True) + \"</div>\". Prefer a template engine with auto-escaping enabled, e.g., Jinja2 autoescape, and never concatenate untrusted data into markup.",
+          "references": [
+            "CVE-2002-2377"
+          ]
+        }
+      ]
+    },
+    {
+      "function": "search_results",
+      "file": "/Users/lin/Desktop/\u5f62\u800c\u4e0a\u5b66/thesis/final_code/data/vuln_fixtures/web_requests.py",
+      "line_start": 44,
+      "line_end": 45,
+      "findings": [
+        {
+          "cwe_id": "CWE-79",
+          "cwe_name": "Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')",
+          "severity": "HIGH",
+          "confidence": 0.95,
+          "line_hint": "return statement line 2",
+          "description": "The function interpolates the user-controlled `query` argument directly into an HTML string without any encoding or validation. An attacker can supply HTML/JavaScript payloads such as <script>alert(1)</script> which will be reflected verbatim in the response and executed in the victim's browser, enabling reflected XSS. This matches the pattern of improper handling of special elements in web page generation described in CWE-159 and exemplified by CVE-2002-2377.",
+          "evidence": "return f\"<p>Results for <b>{query}</b></p>\"",
+          "solution": "Neutralize user input before embedding it in HTML. Use an allowlist/escape approach, e.g., import html; return f\"<p>Results for <b>{html.escape(query)}</b></p>\". Prefer a template engine with auto-escaping enabled instead of manual f-strings.",
+          "references": [
+            "CVE-2002-2377"
+          ]
+        }
+      ]
+    }
+  ]
+}
