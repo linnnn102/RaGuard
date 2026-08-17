@@ -1,0 +1,99 @@
+# corpus_sources.yaml — starting points for the S5 training corpus.
+# ================================================================
+# `build_corpus.py fetch` resolves this into a flat list of .py files, each
+# tagged with a role. It is a STARTING POINT — verify the URLs, prune what you
+# don't want, and add your own. The goal (see docs/finetuning_colab.md):
+#   ~500+ distinct functions · ~40–50% benign · ≥20 examples per core CWE.
+#
+# role:
+#   vulnerable — intentionally-vulnerable apps; the teacher should return
+#                findings here (positive examples, broad CWE spread).
+#   benign     — mature, audited libraries; the teacher should mostly return []
+#                (negative examples — the half the current dataset is missing).
+#
+# Each source is one of:
+#   git:   <url>   cloned by `fetch --clone` into data/corpus_src/<name>/
+#   local: <path>  a directory of code you already have (no clone)
+#
+# include / exclude are rglob-style substrings matched against the repo-relative
+# POSIX path; they narrow a big repo to the code you actually want. Tests,
+# migrations, __pycache__, setup.py, docs, and vendored dirs are skipped by
+# default regardless.
+
+sources:
+  # ── vulnerable apps (positive examples) ──────────────────────────────────
+  - name: dsvw
+    role: vulnerable
+    git: https://github.com/stamparm/DSVW
+    # single dsvw.py, dense with CWE-89/79/78/22/94/611/918 — high yield
+
+  - name: pygoat
+    role: vulnerable
+    git: https://github.com/adeyosemanputra/pygoat
+    include: ["introduction/**"]
+    exclude: ["**/migrations/**"]
+
+  - name: vulpy
+    role: vulnerable
+    git: https://github.com/fportantier/vulpy
+
+  - name: dvpwa
+    role: vulnerable
+    git: https://github.com/anxolerd/dvpwa
+
+  # ── benign, audited libraries (negative examples — the missing half) ──────
+  - name: requests
+    role: benign
+    git: https://github.com/psf/requests
+    include: ["src/**"]
+
+  - name: click
+    role: benign
+    git: https://github.com/pallets/click
+    include: ["src/**"]
+
+  - name: flask
+    role: benign
+    git: https://github.com/pallets/flask
+    include: ["src/**"]
+
+  - name: rich
+    role: benign
+    git: https://github.com/Textualize/rich
+    include: ["rich/**"]
+
+  # High-yield benign: function-dense, audited, pure-Python, minimal security
+  # surface → the teacher should return [] for most functions. These are the
+  # negative examples that fix the low benign share. (Verify URLs before cloning.)
+  - name: boltons          # general utility functions — very high function count, no security surface
+    role: benign
+    git: https://github.com/mahmoud/boltons
+    include: ["boltons/**"]
+  - name: more-itertools   # iterator utilities — pure, safe, dense
+    role: benign
+    git: https://github.com/more-itertools/more-itertools
+    include: ["more_itertools/**"]
+  - name: arrow            # datetime library — obviously-safe domain, adds variety
+    role: benign
+    git: https://github.com/arrow-py/arrow
+    include: ["arrow/**"]
+  - name: httpx            # modern HTTP client — function-dense, well-tested
+    role: benign
+    git: https://github.com/encode/httpx
+    include: ["httpx/**"]
+  - name: werkzeug         # WSGI toolkit — audited; shows CORRECT security-relevant code
+    role: benign
+    git: https://github.com/pallets/werkzeug
+    include: ["src/**"]
+
+  # ── your own code (no clone needed) ──────────────────────────────────────
+  - name: local-targets
+    role: vulnerable
+    local: targets
+
+  # CWE-targeted vulnerable fixtures — fill the long-tail CWEs the real apps miss
+  # (XSS, SSRF, path traversal, deserialization, weak crypto, …). Teacher-labeled
+  # like everything else. Disjoint from eval/testset/ (no leakage).
+  - name: vuln-fixtures
+    role: vulnerable
+    local: data/vuln_fixtures

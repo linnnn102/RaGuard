@@ -1,0 +1,56 @@
+{
+  "description": "Ground truth for the vuln_fixtures teacher-comparison benchmark. Each vulnerable function lists ACCEPTABLE CWE ids (a teacher gets CWE credit if any finding matches). Detection credit needs only a non-empty finding. `clean` functions should produce NO finding; `exclude` are ambiguous and not scored.",
+  "vulnerable": {
+    "run_ping": ["CWE-78"],
+    "backup_database": ["CWE-78"],
+    "convert_image": ["CWE-78"],
+    "tail_log": ["CWE-78"],
+
+    "calc": ["CWE-94", "CWE-95"],
+    "apply_rule": ["CWE-94", "CWE-95"],
+    "evaluate_formula": ["CWE-94", "CWE-95"],
+    "dynamic_import": ["CWE-94", "CWE-95"],
+
+    "fetch_url": ["CWE-918"],
+    "proxy_request": ["CWE-918"],
+    "load_avatar": ["CWE-918"],
+    "parse_xml": ["CWE-611", "CWE-827"],
+    "load_config_xml": ["CWE-611", "CWE-827"],
+    "render_greeting": ["CWE-79", "CWE-80"],
+    "show_comment": ["CWE-79", "CWE-80"],
+    "search_results": ["CWE-79", "CWE-80"],
+
+    "read_file": ["CWE-22", "CWE-23", "CWE-36", "CWE-73"],
+    "download": ["CWE-22", "CWE-23", "CWE-36", "CWE-73"],
+    "get_log": ["CWE-22", "CWE-23", "CWE-36", "CWE-73"],
+    "render_page": ["CWE-1336", "CWE-94", "CWE-74"],
+    "greet": ["CWE-1336", "CWE-94", "CWE-74"],
+    "make_email": ["CWE-1336", "CWE-94", "CWE-74"],
+
+    "login": ["CWE-287", "CWE-208", "CWE-307", "CWE-916"],
+    "verify_token": ["CWE-287", "CWE-288", "CWE-302", "CWE-303"],
+    "set_role": ["CWE-862", "CWE-269", "CWE-639", "CWE-285", "CWE-863"],
+    "delete_account": ["CWE-862", "CWE-285", "CWE-306", "CWE-639"],
+    "view_invoice": ["CWE-639", "CWE-862", "CWE-285", "CWE-566"],
+    "admin_reset_all": ["CWE-306", "CWE-862", "CWE-285"],
+    "get_db_connection": ["CWE-798", "CWE-259", "CWE-321"],
+    "api_client": ["CWE-798", "CWE-259", "CWE-321"],
+
+    "hash_password": ["CWE-327", "CWE-328", "CWE-916"],
+    "sign_token": ["CWE-327", "CWE-328"],
+    "encrypt_secret": ["CWE-327", "CWE-326"],
+    "load_session": ["CWE-502"],
+    "parse_yaml": ["CWE-502"],
+    "load_cache": ["CWE-502"],
+
+    "nslookup_host": ["CWE-78", "CWE-77"],
+    "traceroute": ["CWE-78", "CWE-77"],
+    "get_document": ["CWE-639", "CWE-862", "CWE-285", "CWE-566"],
+    "update_profile": ["CWE-862", "CWE-285", "CWE-639", "CWE-306"],
+    "load_settings": ["CWE-502"],
+    "restore_state": ["CWE-502"]
+  },
+  "clean": ["_db_delete", "_db_get", "_db_truncate", "_connect", "_safe_compare",
+            "_db_fetch", "_db_update"],
+  "exclude": ["_lookup_password"]
+}
