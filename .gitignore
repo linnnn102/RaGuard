@@ -67,4 +67,8 @@ results/reports/*.json
 targets/test_target2.py
 
 # chunking & fine tuning code
-pre_code/
+pre_code/data/corpus/
+data/corpus_src/
+data/train/
+data/export/
+results/
